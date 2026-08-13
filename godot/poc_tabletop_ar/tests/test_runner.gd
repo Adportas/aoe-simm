@@ -718,12 +718,44 @@ func _test_web_ar_shell() -> void:
 		"pagehide" in shell and "stopCamera" in shell,
 		"el shell AR debe apagar la cámara al abandonar la página"
 	)
+	_expect(
+		'id="aoe-quick-look"' in shell
+		and 'rel="ar"' in shell
+		and 'href="quicklook/isla-aoe.usdz"' in shell
+		and 'src="quicklook/isla-aoe-preview.png"' in shell,
+		"el shell debe ofrecer el USDZ mediante un enlace Apple AR Quick Look"
+	)
+	_expect(
+		'quickLookProbe.relList.supports("ar")' in shell
+		and "aoe-quick-look-ready" in shell,
+		"el acceso Quick Look debe mostrarse solo cuando Safari anuncie soporte AR"
+	)
+	var usdz_path := "res://web/quicklook/isla-aoe.usdz"
+	var usdz := FileAccess.get_file_as_bytes(usdz_path)
+	_expect(
+		usdz.size() > 1_000_000 and usdz.size() < 4_000_000,
+		"el USDZ Quick Look debe existir y conservar un peso razonable para móvil"
+	)
+	if usdz.size() >= 4:
+		_expect(
+			usdz[0] == 0x50 and usdz[1] == 0x4b
+			and usdz[2] == 0x03 and usdz[3] == 0x04,
+			"el asset Quick Look debe ser un paquete USDZ ZIP válido"
+		)
+	_expect(
+		FileAccess.file_exists("res://web/quicklook/isla-aoe-preview.png"),
+		"el enlace Quick Look debe incluir su imagen de previsualización"
+	)
 	var web_preset := FileAccess.get_file_as_string(
 		"res://export_presets.web.example"
 	)
 	_expect(
 		'html/custom_html_shell="res://web/aoe_ar_shell.html"' in web_preset,
 		"el preset web debe exportar con el shell de cámara"
+	)
+	_expect(
+		"web/quicklook/*" in web_preset,
+		"el preset debe copiar Quick Look fuera del PCK para que Safari acceda al USDZ"
 	)
 
 

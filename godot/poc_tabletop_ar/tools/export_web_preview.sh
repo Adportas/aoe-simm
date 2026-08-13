@@ -45,9 +45,20 @@ fi
 mkdir -p "$output_directory"
 godot --headless --path "$project_directory" \
 	--export-release "Web Preview" "$output_directory/index.html"
+mkdir -p "$output_directory/quicklook"
+cp "$project_directory/web/quicklook/isla-aoe.usdz" \
+	"$output_directory/quicklook/isla-aoe.usdz"
+cp "$project_directory/web/quicklook/isla-aoe-preview.png" \
+	"$output_directory/quicklook/isla-aoe-preview.png"
 touch "$output_directory/.nojekyll"
 
-for required_file in index.html index.js index.wasm index.pck; do
+for required_file in \
+	index.html \
+	index.js \
+	index.wasm \
+	index.pck \
+	quicklook/isla-aoe.usdz \
+	quicklook/isla-aoe-preview.png; do
 	if [[ ! -s "$output_directory/$required_file" ]]; then
 		print -u2 "Falta el archivo Web exportado: $required_file"
 		exit 1
@@ -55,4 +66,4 @@ for required_file in index.html index.js index.wasm index.pck; do
 done
 
 print "Vista web exportada en $output_directory/index.html"
-print "Servir localmente: python3 -m http.server 8060 --directory '$output_directory'"
+print "Servir localmente: python3 '$script_directory/serve_web_preview.py' --directory '$output_directory'"
