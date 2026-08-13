@@ -1232,9 +1232,25 @@ func _test_walking_showcase() -> void:
 	var physical_table := showcase.get("physical_table") as MeshInstance3D
 	var terrain_material := showcase.get("terrain_material") as ShaderMaterial
 	var diorama_root := showcase.get("diorama_root") as Node3D
+	var zoom_out_button := showcase.get("zoom_out_button") as Button
+	var zoom_in_button := showcase.get("zoom_in_button") as Button
+	var rotate_left_button := showcase.get("rotate_left_button") as Button
+	var rotate_right_button := showcase.get("rotate_right_button") as Button
+	var view_status_label := showcase.get("view_status_label") as Label
 	_expect(controller != null, "el paisaje debe instanciar un controlador de aldeano")
 	_expect(showcase_camera != null, "el paseo debe crear una cámara")
 	_expect(showcase_ocean != null, "el paisaje debe incluir el océano alrededor de la isla")
+	_expect(
+		zoom_out_button != null
+		and zoom_in_button != null
+		and rotate_left_button != null
+		and rotate_right_button != null,
+		"el visor debe exponer controles de zoom y giro en ambos sentidos"
+	)
+	_expect(
+		view_status_label != null and "Zoom 100%" in view_status_label.text,
+		"el visor debe informar el nivel de zoom actual"
+	)
 	if showcase_ocean != null:
 		_expect_near(
 			showcase_ocean.position.y,
@@ -1374,6 +1390,74 @@ func _test_walking_showcase() -> void:
 			) < 0.01,
 			"el aldeano debe partir del extremo izquierdo de la isla"
 		)
+		if (
+			showcase_camera != null
+			and diorama_root != null
+			and zoom_out_button != null
+			and zoom_in_button != null
+			and rotate_left_button != null
+			and rotate_right_button != null
+		):
+			var base_camera_position := showcase_camera.global_position
+			var view_pivot := diorama_root.global_position
+			var base_camera_distance := base_camera_position.distance_to(view_pivot)
+			zoom_in_button.pressed.emit()
+			_expect(
+				showcase_camera.global_position.distance_to(view_pivot)
+					< base_camera_distance,
+				"Acercar debe reducir la distancia al centro del diorama"
+			)
+			zoom_out_button.pressed.emit()
+			_expect_near(
+				showcase_camera.global_position.distance_to(view_pivot),
+				base_camera_distance,
+				0.0001,
+				"Alejar debe recuperar la distancia anterior"
+			)
+			rotate_right_button.pressed.emit()
+			_expect(
+				showcase_camera.global_position.distance_to(base_camera_position)
+					> 0.01,
+				"Girar debe orbitar la cámara alrededor del eje vertical central"
+			)
+			_expect_near(
+				showcase_camera.global_position.distance_to(view_pivot),
+				base_camera_distance,
+				0.0001,
+				"el giro debe conservar la distancia al centro"
+			)
+			_expect_near(
+				float(showcase.get("_viewer_yaw_rad")),
+				float(showcase.VIEW_ROTATION_STEP_RAD),
+				0.0001,
+				"el botón de giro debe avanzar 15 grados"
+			)
+			rotate_left_button.pressed.emit()
+			_expect_near(
+				float(showcase.get("_viewer_yaw_rad")),
+				0.0,
+				0.0001,
+				"los giros opuestos deben cancelarse"
+			)
+			var zoom_key := InputEventKey.new()
+			zoom_key.pressed = true
+			zoom_key.keycode = KEY_EQUAL
+			_expect(
+				bool(showcase.call("_handle_view_input", zoom_key)),
+				"la tecla + debe activar el zoom"
+			)
+			_expect(
+				float(showcase.get("_viewer_zoom")) < 1.0,
+				"el atajo + debe acercar la vista"
+			)
+			showcase.call("_reset_view")
+			_expect(
+				showcase_camera.global_position.distance_to(base_camera_position)
+					< 0.0001,
+				"restaurar debe recuperar el encuadre base"
+			)
+			_test_ios_view_gestures(showcase, showcase_camera, view_pivot)
+			showcase.call("_reset_view")
 		var initial_camera_position := showcase_camera.global_position
 		var camera_inverse := showcase_camera.global_transform.affine_inverse()
 		var start_in_camera: Vector3 = camera_inverse * showcase.calibration.simulation_to_world(
@@ -1507,6 +1591,126 @@ func _test_walking_showcase() -> void:
 			)
 		)
 	showcase.queue_free()
+
+
+func _test_ios_view_gestures(
+	showcase: Node,
+	showcase_camera: Camera3D,
+	view_pivot: Vector3
+) -> void:
+	var single_click := InputEventMouseButton.new()
+	single_click.button_index = MOUSE_BUTTON_LEFT
+	single_click.pressed = true
+	single_click.position = Vector2(320.0, 240.0)
+	_expect(
+		not bool(showcase.call("_destination_activation_for_event", single_click).get("ok")),
+		"un clic simple no debe fijar un destino"
+	)
+	var double_click := InputEventMouseButton.new()
+	double_click.button_index = MOUSE_BUTTON_LEFT
+	double_click.pressed = true
+	double_click.double_click = true
+	double_click.position = Vector2(320.0, 240.0)
+	_expect(
+		bool(showcase.call("_destination_activation_for_event", double_click).get("ok")),
+		"el doble clic debe activar un destino"
+	)
+	var single_tap := InputEventScreenTouch.new()
+	single_tap.index = 0
+	single_tap.pressed = true
+	single_tap.position = Vector2(320.0, 240.0)
+	_expect(
+		not bool(showcase.call("_destination_activation_for_event", single_tap).get("ok")),
+		"un toque simple no debe fijar un destino"
+	)
+	var double_tap := InputEventScreenTouch.new()
+	double_tap.index = 0
+	double_tap.pressed = true
+	double_tap.double_tap = true
+	double_tap.position = Vector2(320.0, 240.0)
+	_expect(
+		bool(showcase.call("_destination_activation_for_event", double_tap).get("ok")),
+		"el doble toque de iOS debe activar un destino"
+	)
+
+	var touch_left := InputEventScreenTouch.new()
+	touch_left.index = 0
+	touch_left.pressed = true
+	touch_left.position = Vector2(200.0, 300.0)
+	_expect(
+		not bool(showcase.call("_handle_view_input", touch_left)),
+		"el primer dedo no debe mover la cámara"
+	)
+	var touch_right := InputEventScreenTouch.new()
+	touch_right.index = 1
+	touch_right.pressed = true
+	touch_right.position = Vector2(400.0, 300.0)
+	_expect(
+		bool(showcase.call("_handle_view_input", touch_right)),
+		"el segundo dedo debe iniciar el gesto de cámara"
+	)
+	var base_distance := showcase_camera.global_position.distance_to(view_pivot)
+	var pinch_in := InputEventScreenDrag.new()
+	pinch_in.index = 1
+	pinch_in.position = Vector2(350.0, 300.0)
+	pinch_in.relative = Vector2(-50.0, 0.0)
+	_expect(
+		bool(showcase.call("_handle_view_input", pinch_in)),
+		"juntar los dedos debe consumirse como gesto de zoom"
+	)
+	_expect(
+		showcase_camera.global_position.distance_to(view_pivot) < base_distance,
+		"juntar los dedos debe acercar la cámara"
+	)
+	var pinch_out := InputEventScreenDrag.new()
+	pinch_out.index = 1
+	pinch_out.position = Vector2(400.0, 300.0)
+	pinch_out.relative = Vector2(50.0, 0.0)
+	showcase.call("_handle_view_input", pinch_out)
+	_expect_near(
+		showcase_camera.global_position.distance_to(view_pivot),
+		base_distance,
+		0.0001,
+		"abrir los dedos debe alejar y recuperar la distancia"
+	)
+	var twist := InputEventScreenDrag.new()
+	twist.index = 1
+	twist.position = Vector2(200.0, 500.0)
+	twist.relative = Vector2(-200.0, 200.0)
+	showcase.call("_handle_view_input", twist)
+	_expect_near(
+		float(showcase.get("_viewer_yaw_rad")),
+		PI / 2.0,
+		0.0001,
+		"girar dos dedos juntos debe orbitar la cámara 90 grados"
+	)
+	_expect_near(
+		showcase_camera.global_position.distance_to(view_pivot),
+		base_distance,
+		0.0001,
+		"el giro de dos dedos debe conservar la distancia al centro"
+	)
+	var release_right := InputEventScreenTouch.new()
+	release_right.index = 1
+	release_right.pressed = false
+	release_right.position = twist.position
+	_expect(
+		bool(showcase.call("_handle_view_input", release_right)),
+		"soltar un dedo del gesto no debe producir un toque de destino"
+	)
+	var release_left := InputEventScreenTouch.new()
+	release_left.index = 0
+	release_left.pressed = false
+	release_left.position = touch_left.position
+	_expect(
+		bool(showcase.call("_handle_view_input", release_left)),
+		"el último dedo del gesto tampoco debe producir un toque de destino"
+	)
+	_expect(
+		not bool(showcase.get("_multi_touch_active"))
+		and (showcase.get("_touch_positions") as Dictionary).is_empty(),
+		"al soltar ambos dedos debe cerrarse el gesto táctil"
+	)
 
 
 func _expect(condition: bool, message: String) -> void:

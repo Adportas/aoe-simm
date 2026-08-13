@@ -24,6 +24,12 @@ const SHOT_SIDE_OFFSET_M := 0.115
 const SHOT_HEIGHT_M := 0.075
 const SHOT_TERRAIN_CLEARANCE_M := 0.050
 const CINEMATIC_CHARACTER_BOOST := 1.85
+const VIEW_ZOOM_MIN := 0.55
+const VIEW_ZOOM_MAX := 2.0
+const VIEW_ZOOM_FACTOR := 1.15
+const VIEW_ROTATION_STEP_RAD := PI / 12.0
+const VIEW_DRAG_RADIANS_PER_PIXEL := 0.006
+const TOUCH_GESTURE_MIN_DISTANCE_PX := 12.0
 
 enum DesktopCameraMode {
 	CINEMATIC,
@@ -51,6 +57,11 @@ var capture_corner_button: Button
 var grid_button: Button
 var walk_button: Button
 var camera_button: Button
+var zoom_out_button: Button
+var zoom_in_button: Button
+var rotate_left_button: Button
+var rotate_right_button: Button
+var view_status_label: Label
 var crosshair: Label
 var _captured_corners := PackedVector3Array()
 var _ar_status := "Simulador de escritorio"
@@ -64,6 +75,16 @@ var _auto_walk_enabled := true
 var _next_walk_route_index := 1
 var _journey_complete := false
 var _desktop_camera_mode := DesktopCameraMode.CINEMATIC
+var _desktop_camera_base_transform := Transform3D.IDENTITY
+var _desktop_camera_base_valid := false
+var _viewer_zoom := 1.0
+var _viewer_yaw_rad := 0.0
+var _touch_positions: Dictionary = {}
+var _gesture_touch_indices := PackedInt32Array()
+var _gesture_consumed_indices: Dictionary = {}
+var _multi_touch_active := false
+var _multi_touch_previous_distance := 0.0
+var _multi_touch_previous_angle := 0.0
 var _rng := RandomNumberGenerator.new()
 var biome_counts: Dictionary = {}
 var _is_web_preview := RUNTIME_PROFILE.is_web_preview()
@@ -101,23 +122,184 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	var screen_position := Vector2.ZERO
-	var pressed := false
-	if event is InputEventMouseButton:
-		var mouse_event := event as InputEventMouseButton
-		pressed = mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed
-		screen_position = mouse_event.position
-	elif event is InputEventScreenTouch:
-		var touch_event := event as InputEventScreenTouch
-		pressed = touch_event.pressed
-		screen_position = touch_event.position
-	if not pressed or not calibration.is_valid:
+	if _handle_view_input(event):
+		get_viewport().set_input_as_handled()
 		return
 
-	var hit := _screen_to_terrain(screen_position)
+	var activation := _destination_activation_for_event(event)
+	if not bool(activation.get("ok", false)) or not calibration.is_valid:
+		return
+
+	var hit := _screen_to_terrain(activation["position"] as Vector2)
 	if hit.get("ok", false):
 		_set_manual_target(hit["position"])
 		get_viewport().set_input_as_handled()
+
+
+func _handle_view_input(event: InputEvent) -> bool:
+	if _is_ar_mode:
+		return false
+	if event is InputEventScreenTouch:
+		return _handle_touch_contact(event as InputEventScreenTouch)
+	if event is InputEventScreenDrag:
+		return _handle_touch_drag(event as InputEventScreenDrag)
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if not key_event.pressed or key_event.echo:
+			return false
+		match key_event.keycode:
+			KEY_EQUAL, KEY_KP_ADD:
+				_on_zoom_in()
+				return true
+			KEY_MINUS, KEY_KP_SUBTRACT:
+				_on_zoom_out()
+				return true
+			KEY_Q:
+				_on_rotate_left()
+				return true
+			KEY_E:
+				_on_rotate_right()
+				return true
+			KEY_R, KEY_HOME:
+				_reset_view()
+				return true
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if not mouse_event.pressed:
+			return false
+		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_on_zoom_in()
+			return true
+		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_on_zoom_out()
+			return true
+	if event is InputEventMouseMotion:
+		var motion_event := event as InputEventMouseMotion
+		if motion_event.button_mask & MOUSE_BUTTON_MASK_RIGHT:
+			_rotate_view(-motion_event.relative.x * VIEW_DRAG_RADIANS_PER_PIXEL)
+			return true
+	if event is InputEventMagnifyGesture:
+		var magnify_event := event as InputEventMagnifyGesture
+		if magnify_event.factor > 0.0:
+			_set_viewer_zoom(_viewer_zoom * magnify_event.factor)
+			return true
+	return false
+
+
+func _destination_activation_for_event(event: InputEvent) -> Dictionary:
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		return {
+			"ok": (
+				mouse_event.button_index == MOUSE_BUTTON_LEFT
+				and mouse_event.pressed
+				and mouse_event.double_click
+			),
+			"position": mouse_event.position,
+		}
+	if event is InputEventScreenTouch:
+		var touch_event := event as InputEventScreenTouch
+		return {
+			"ok": touch_event.pressed and touch_event.double_tap,
+			"position": touch_event.position,
+		}
+	return {"ok": false}
+
+
+func _handle_touch_contact(event: InputEventScreenTouch) -> bool:
+	if event.pressed:
+		_touch_positions[event.index] = event.position
+		if _touch_positions.size() < 2:
+			return false
+		_gesture_consumed_indices[event.index] = true
+		if not _multi_touch_active:
+			_begin_multi_touch_gesture()
+		return true
+
+	var was_gesture := _gesture_consumed_indices.has(event.index)
+	var ended_active_pair := (
+		_multi_touch_active and _gesture_touch_indices.has(event.index)
+	)
+	_touch_positions.erase(event.index)
+	if ended_active_pair:
+		_end_multi_touch_gesture()
+		if _touch_positions.size() >= 2:
+			_begin_multi_touch_gesture()
+	if _touch_positions.is_empty():
+		_gesture_consumed_indices.clear()
+	return was_gesture
+
+
+func _handle_touch_drag(event: InputEventScreenDrag) -> bool:
+	_touch_positions[event.index] = event.position
+	if not _multi_touch_active:
+		return _gesture_consumed_indices.has(event.index)
+	if not _gesture_touch_indices.has(event.index):
+		return true
+	_apply_multi_touch_gesture()
+	return true
+
+
+func _begin_multi_touch_gesture() -> void:
+	var touch_indices := _touch_positions.keys()
+	touch_indices.sort()
+	if touch_indices.size() < 2:
+		return
+	_gesture_touch_indices = PackedInt32Array([
+		int(touch_indices[0]),
+		int(touch_indices[1]),
+	])
+	for touch_index in _gesture_touch_indices:
+		_gesture_consumed_indices[touch_index] = true
+	var first_position: Vector2 = _touch_positions[_gesture_touch_indices[0]]
+	var second_position: Vector2 = _touch_positions[_gesture_touch_indices[1]]
+	var offset := second_position - first_position
+	_multi_touch_previous_distance = offset.length()
+	_multi_touch_previous_angle = offset.angle()
+	_multi_touch_active = true
+
+
+func _end_multi_touch_gesture() -> void:
+	_multi_touch_active = false
+	_gesture_touch_indices = PackedInt32Array()
+	_multi_touch_previous_distance = 0.0
+	_multi_touch_previous_angle = 0.0
+
+
+func _apply_multi_touch_gesture() -> void:
+	if not _multi_touch_active or _gesture_touch_indices.size() != 2:
+		return
+	var first_position: Vector2 = _touch_positions[_gesture_touch_indices[0]]
+	var second_position: Vector2 = _touch_positions[_gesture_touch_indices[1]]
+	var offset := second_position - first_position
+	var current_distance := offset.length()
+	var current_angle := offset.angle()
+	if (
+		current_distance >= TOUCH_GESTURE_MIN_DISTANCE_PX
+		and _multi_touch_previous_distance >= TOUCH_GESTURE_MIN_DISTANCE_PX
+	):
+		var distance_ratio := current_distance / _multi_touch_previous_distance
+		var angle_delta := wrapf(
+			current_angle - _multi_touch_previous_angle,
+			-PI,
+			PI
+		)
+		var next_zoom := clampf(
+			_viewer_zoom * distance_ratio,
+			VIEW_ZOOM_MIN,
+			VIEW_ZOOM_MAX
+		)
+		var next_yaw := wrapf(_viewer_yaw_rad + angle_delta, -PI, PI)
+		if (
+			not is_equal_approx(next_zoom, _viewer_zoom)
+			or not is_equal_approx(next_yaw, _viewer_yaw_rad)
+		):
+			_viewer_zoom = next_zoom
+			_viewer_yaw_rad = next_yaw
+			_apply_viewer_camera_transform()
+			_refresh_view_controls()
+	_multi_touch_previous_distance = current_distance
+	_multi_touch_previous_angle = current_angle
 
 
 func _build_camera_background() -> void:
@@ -394,6 +576,44 @@ func _build_interface() -> void:
 	camera_button = _make_button("Cámara: plano fijo", _on_cycle_camera)
 	actions.add_child(camera_button)
 
+	var view_controls := GridContainer.new()
+	view_controls.name = "ViewControls"
+	view_controls.columns = 4
+	view_controls.add_theme_constant_override("h_separation", 7)
+	view_controls.add_theme_constant_override("v_separation", 7)
+	panel_content.add_child(view_controls)
+	zoom_out_button = _make_button("− Alejar", _on_zoom_out)
+	zoom_out_button.name = "ZoomOutButton"
+	zoom_out_button.tooltip_text = "Alejar la cámara (− o rueda hacia abajo)"
+	view_controls.add_child(zoom_out_button)
+	zoom_in_button = _make_button("+ Acercar", _on_zoom_in)
+	zoom_in_button.name = "ZoomInButton"
+	zoom_in_button.tooltip_text = "Acercar la cámara (+ o rueda hacia arriba)"
+	view_controls.add_child(zoom_in_button)
+	rotate_left_button = _make_button("↺ 15°", _on_rotate_left)
+	rotate_left_button.name = "RotateLeftButton"
+	rotate_left_button.tooltip_text = "Girar alrededor del eje central hacia la izquierda (Q)"
+	view_controls.add_child(rotate_left_button)
+	rotate_right_button = _make_button("15° ↻", _on_rotate_right)
+	rotate_right_button.name = "RotateRightButton"
+	rotate_right_button.tooltip_text = "Girar alrededor del eje central hacia la derecha (E)"
+	view_controls.add_child(rotate_right_button)
+
+	view_status_label = Label.new()
+	view_status_label.name = "ViewStatus"
+	view_status_label.add_theme_font_size_override("font_size", 13)
+	view_status_label.text = "Zoom 100% · giro 0°"
+	panel_content.add_child(view_status_label)
+	var view_hint := Label.new()
+	view_hint.text = (
+		"iPhone/iPad: juntar = acercar · abrir = alejar · girar dos dedos\n"
+		+ "Mouse: rueda o +/− · Q/E o arrastre derecho · R: restaurar"
+	)
+	view_hint.add_theme_color_override("font_color", Color(0.68, 0.78, 0.85))
+	view_hint.add_theme_font_size_override("font_size", 12)
+	view_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel_content.add_child(view_hint)
+
 	capture_corner_button = _make_button("Capturar esquina 1", _on_capture_corner)
 	capture_corner_button.visible = false
 	panel_content.add_child(capture_corner_button)
@@ -401,7 +621,7 @@ func _build_interface() -> void:
 	instruction_label = Label.new()
 	instruction_label.text = (
 		"El aldeano cruzará desde el cabo izquierdo hasta las rocas centrales. "
-		+ "Haz clic sobre el terreno para darle un destino manual."
+		+ "Haz doble clic o doble toque sobre el terreno para darle un destino manual."
 	)
 	instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	instruction_label.custom_minimum_size.x = 350.0
@@ -417,6 +637,7 @@ func _build_interface() -> void:
 	crosshair.size = Vector2(24.0, 48.0)
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	interface_layer.add_child(crosshair)
+	_refresh_view_controls()
 
 
 func _make_button(text_value: String, callback: Callable) -> Button:
@@ -437,6 +658,7 @@ func _start_runtime_mode() -> void:
 	_is_ar_mode = ar_adapter.start()
 	crosshair.visible = _is_ar_mode
 	_refresh_camera_button()
+	_refresh_view_controls()
 	if _is_ar_mode:
 		calibration.clear()
 		diorama_root.visible = false
@@ -505,7 +727,8 @@ func _on_unit_target_reached() -> void:
 		)
 		return
 	instruction_label.text = (
-		"Destino alcanzado. Haz clic en otro punto o reinicia el paseo a las rocas."
+		"Destino alcanzado. Haz doble clic o doble toque en otro punto, "
+		+ "o reinicia el paseo a las rocas."
 	)
 
 
@@ -619,6 +842,97 @@ func _on_cycle_camera() -> void:
 			_set_desktop_camera_mode(DesktopCameraMode.CINEMATIC)
 
 
+func _on_zoom_out() -> void:
+	_set_viewer_zoom(_viewer_zoom * VIEW_ZOOM_FACTOR)
+
+
+func _on_zoom_in() -> void:
+	_set_viewer_zoom(_viewer_zoom / VIEW_ZOOM_FACTOR)
+
+
+func _on_rotate_left() -> void:
+	_rotate_view(-VIEW_ROTATION_STEP_RAD)
+
+
+func _on_rotate_right() -> void:
+	_rotate_view(VIEW_ROTATION_STEP_RAD)
+
+
+func _set_viewer_zoom(value: float) -> void:
+	if _is_ar_mode:
+		return
+	_viewer_zoom = clampf(value, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX)
+	_apply_viewer_camera_transform()
+	_refresh_view_controls()
+
+
+func _rotate_view(delta_radians: float) -> void:
+	if _is_ar_mode or is_zero_approx(delta_radians):
+		return
+	_viewer_yaw_rad = wrapf(_viewer_yaw_rad + delta_radians, -PI, PI)
+	_apply_viewer_camera_transform()
+	_refresh_view_controls()
+
+
+func _reset_view() -> void:
+	if _is_ar_mode:
+		return
+	_viewer_zoom = 1.0
+	_viewer_yaw_rad = 0.0
+	_apply_viewer_camera_transform()
+	_refresh_view_controls()
+
+
+func _capture_desktop_camera_base() -> void:
+	if _is_ar_mode or not is_instance_valid(camera):
+		return
+	_desktop_camera_base_transform = camera.global_transform
+	_desktop_camera_base_valid = true
+	_apply_viewer_camera_transform()
+
+
+func _apply_viewer_camera_transform() -> void:
+	if (
+		_is_ar_mode
+		or not _desktop_camera_base_valid
+		or not is_instance_valid(camera)
+		or not is_instance_valid(diorama_root)
+	):
+		return
+	var pivot := diorama_root.global_position
+	var vertical_axis := diorama_root.global_basis.y.normalized()
+	if vertical_axis.length_squared() < 0.99:
+		vertical_axis = Vector3.UP
+	var orbit := Basis(vertical_axis, _viewer_yaw_rad)
+	var result := _desktop_camera_base_transform
+	var base_offset := _desktop_camera_base_transform.origin - pivot
+	result.origin = pivot + orbit * (base_offset * _viewer_zoom)
+	result.basis = orbit * _desktop_camera_base_transform.basis
+	camera.global_transform = result
+
+
+func _refresh_view_controls() -> void:
+	for button in [
+		zoom_out_button,
+		zoom_in_button,
+		rotate_left_button,
+		rotate_right_button,
+	]:
+		if is_instance_valid(button):
+			button.disabled = _is_ar_mode
+	if not is_instance_valid(view_status_label):
+		return
+	if _is_ar_mode:
+		view_status_label.text = "Vista controlada por el dispositivo AR"
+		return
+	var zoom_percent := roundi(100.0 / _viewer_zoom)
+	var yaw_degrees := roundi(rad_to_deg(_viewer_yaw_rad))
+	view_status_label.text = "Zoom %d%% · giro %d°" % [
+		zoom_percent,
+		yaw_degrees,
+	]
+
+
 func _set_desktop_camera_mode(mode: int) -> void:
 	_desktop_camera_mode = mode
 	_apply_character_presentation_scale()
@@ -714,6 +1028,7 @@ func _frame_cinematic_segment(start_xz: Vector2, end_xz: Vector2) -> void:
 		)
 	camera.global_position = desired_position
 	camera.look_at(look_target, Vector3.UP)
+	_capture_desktop_camera_base()
 
 
 func _refresh_camera_button() -> void:
@@ -740,6 +1055,7 @@ func _set_desktop_camera(top_view: bool) -> void:
 	else:
 		camera.position = Vector3(0.88, 1.72, 0.02)
 		camera.look_at(Vector3(0.0, 0.06, 0.0), Vector3.UP)
+	_capture_desktop_camera_base()
 
 
 func _on_capture_corner() -> void:
@@ -763,7 +1079,7 @@ func _on_capture_corner() -> void:
 		capture_corner_button.text = "Recalibrar mesa"
 		instruction_label.text = (
 			"Mesa fijada. El aldeano ya recorre el paisaje; "
-			+ "toca el terreno para cambiar su destino."
+			+ "toca dos veces el terreno para cambiar su destino."
 		)
 		_ar_status = "Mesa calibrada y terreno bloqueado"
 	else:
