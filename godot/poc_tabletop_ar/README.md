@@ -69,6 +69,8 @@ puede seguir el mapa de alturas sin mezclar escalas físicas y lógicas.
 - Adaptador ARKit: sesión, planos horizontales, malla LiDAR, pose de cámara y
   raycast desde la cruz central.
 - Conversión de cámara ARKit Y/CbCr a RGB con diagnóstico del tiempo de copia.
+- Prueba web Apple AR Quick Look con un USDZ liviano de la isla, escala de
+  mesa y anclaje real sobre superficies detectadas por ARKit.
 
 ## Probar ahora en el Mac
 
@@ -102,12 +104,14 @@ Con las plantillas Web de Godot 4.7.1 instaladas:
 
 ```sh
 tools/export_web_preview.sh
-python3 -m http.server 8060 --directory exports/web-preview
+python3 tools/serve_web_preview.py
 ```
 
 Abrir `http://localhost:8060`. El exportador usa
 `export_presets.web.example` temporalmente y restaura cualquier
 `export_presets.cfg` existente, por lo que no pisa la configuración iOS.
+El servidor local registra `.usdz` como `model/vnd.usdz+zip`, requerido por
+Safari para reconocer Apple AR Quick Look.
 
 El panel del visor incluye **Alejar**, **Acercar** y giro de 15° en ambos
 sentidos alrededor del eje vertical central de la isla. También se puede usar
@@ -125,6 +129,24 @@ prueba de composición: Safari en iOS no expone sesiones WebXR
 `immersive-ar`, por lo que no detecta planos ni mantiene el diorama anclado al
 mover el teléfono. La build iOS usa el adaptador ARKit descrito arriba para
 añadir seguimiento 6DoF, raycast y calibración real de la mesa.
+
+En Safari compatible aparece además **AR · Anclar isla a la mesa**. Ese acceso
+abre Apple AR Quick Look con una miniatura USDZ de **72 × 40 cm**, detecta una
+superficie horizontal y permite colocarla, moverla, ampliarla y girarla con
+los gestos nativos de iOS. Quick Look sí mantiene el anclaje al mover el
+teléfono, pero es un visor separado: esta prueba no incluye todavía el paseo
+del aldeano ni el doble toque interactivo dentro de AR.
+
+El USDZ publicado pesa cerca de 2,2 MiB, incluye terreno, textura, palmeras y
+rocas simplificadas, y se regenera en macOS con Apple USD Tools mediante:
+
+```sh
+python3 tools/generate_quick_look_usdz.py
+```
+
+El generador valida el resultado con `usdchecker --arkit`. Tanto el exportador
+local como GitHub Actions copian el modelo a `quicklook/isla-aoe.usdz`, fuera
+del PCK de Godot, para que Safari pueda abrirlo directamente.
 
 Para validar con una plantilla descargada fuera de la instalación de Godot:
 

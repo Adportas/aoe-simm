@@ -53,12 +53,19 @@ jobs:
           godot --headless --path "$PROJECT_PATH" \
             --export-release "Web Preview" "$export_directory/$asset_name.html"
           mv "$export_directory/$asset_name.html" "$export_directory/index.html"
+          mkdir -p "$export_directory/quicklook"
+          cp "$PROJECT_PATH/web/quicklook/isla-aoe.usdz" \
+            "$export_directory/quicklook/isla-aoe.usdz"
+          cp "$PROJECT_PATH/web/quicklook/isla-aoe-preview.png" \
+            "$export_directory/quicklook/isla-aoe-preview.png"
           touch "$export_directory/.nojekyll"
           for required_file in \
             index.html \
             "$asset_name.js" \
             "$asset_name.wasm" \
-            "$asset_name.pck"; do
+            "$asset_name.pck" \
+            quicklook/isla-aoe.usdz \
+            quicklook/isla-aoe-preview.png; do
             test -s "$export_directory/$required_file"
           done
           du -sh "$export_directory"
