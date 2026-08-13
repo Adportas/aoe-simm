@@ -117,6 +117,15 @@ encuadre. En iPhone y iPad, juntar dos dedos acerca la cámara, abrirlos la
 aleja y girarlos juntos orbita la vista alrededor del centro de la isla. Un
 doble toque fija el destino del aldeano; un toque simple no lo desplaza.
 
+El botón **Probar AR con cámara** solicita la cámara trasera y compone el
+diorama sobre el video en la misma página HTTPS. Conserva los gestos y el
+movimiento por doble toque, y permite validar encuadre, escala, legibilidad y
+rendimiento directamente en iPhone. Esta vista web es deliberadamente una
+prueba de composición: Safari en iOS no expone sesiones WebXR
+`immersive-ar`, por lo que no detecta planos ni mantiene el diorama anclado al
+mover el teléfono. La build iOS usa el adaptador ARKit descrito arriba para
+añadir seguimiento 6DoF, raycast y calibración real de la mesa.
+
 Para validar con una plantilla descargada fuera de la instalación de Godot:
 
 ```sh
