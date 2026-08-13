@@ -1399,20 +1399,27 @@ func _test_walking_showcase() -> void:
 			and rotate_right_button != null
 		):
 			var base_camera_position := showcase_camera.global_position
+			var base_camera_basis := showcase_camera.global_basis
+			var base_camera_fov := showcase_camera.fov
 			var view_pivot := diorama_root.global_position
 			var base_camera_distance := base_camera_position.distance_to(view_pivot)
 			zoom_in_button.pressed.emit()
 			_expect(
-				showcase_camera.global_position.distance_to(view_pivot)
-					< base_camera_distance,
-				"Acercar debe reducir la distancia al centro del diorama"
+				showcase_camera.fov < base_camera_fov,
+				"Acercar debe estrechar el campo de visión"
+			)
+			_expect(
+				showcase_camera.global_position.distance_to(base_camera_position)
+					< 0.0001
+				and showcase_camera.global_basis.is_equal_approx(base_camera_basis),
+				"el zoom debe mantener inmóvil el centro del encuadre"
 			)
 			zoom_out_button.pressed.emit()
 			_expect_near(
-				showcase_camera.global_position.distance_to(view_pivot),
-				base_camera_distance,
+				showcase_camera.fov,
+				base_camera_fov,
 				0.0001,
-				"Alejar debe recuperar la distancia anterior"
+				"Alejar debe recuperar el campo de visión anterior"
 			)
 			rotate_right_button.pressed.emit()
 			_expect(
@@ -1453,7 +1460,8 @@ func _test_walking_showcase() -> void:
 			showcase.call("_reset_view")
 			_expect(
 				showcase_camera.global_position.distance_to(base_camera_position)
-					< 0.0001,
+					< 0.0001
+				and is_equal_approx(showcase_camera.fov, base_camera_fov),
 				"restaurar debe recuperar el encuadre base"
 			)
 			_test_ios_view_gestures(showcase, showcase_camera, view_pivot)
@@ -1615,22 +1623,40 @@ func _test_ios_view_gestures(
 		bool(showcase.call("_destination_activation_for_event", double_click).get("ok")),
 		"el doble clic debe activar un destino"
 	)
-	var single_tap := InputEventScreenTouch.new()
-	single_tap.index = 0
-	single_tap.pressed = true
-	single_tap.position = Vector2(320.0, 240.0)
+	var first_tap_down := InputEventScreenTouch.new()
+	first_tap_down.index = 7
+	first_tap_down.pressed = true
+	first_tap_down.position = Vector2(320.0, 240.0)
 	_expect(
-		not bool(showcase.call("_destination_activation_for_event", single_tap).get("ok")),
+		not bool(showcase.call("_handle_touch_contact_at", first_tap_down, 1000)),
 		"un toque simple no debe fijar un destino"
 	)
-	var double_tap := InputEventScreenTouch.new()
-	double_tap.index = 0
-	double_tap.pressed = true
-	double_tap.double_tap = true
-	double_tap.position = Vector2(320.0, 240.0)
+	var first_tap_up := InputEventScreenTouch.new()
+	first_tap_up.index = 7
+	first_tap_up.pressed = false
+	first_tap_up.position = first_tap_down.position
+	showcase.call("_handle_touch_contact_at", first_tap_up, 1080)
 	_expect(
-		bool(showcase.call("_destination_activation_for_event", double_tap).get("ok")),
-		"el doble toque de iOS debe activar un destino"
+		not bool(showcase.call("_destination_activation_for_event", first_tap_up).get("ok")),
+		"el primer toque completo debe esperar un segundo toque"
+	)
+	var second_tap_down := InputEventScreenTouch.new()
+	second_tap_down.index = 7
+	second_tap_down.pressed = true
+	second_tap_down.position = Vector2(323.0, 242.0)
+	showcase.call("_handle_touch_contact_at", second_tap_down, 1240)
+	var second_tap_up := InputEventScreenTouch.new()
+	second_tap_up.index = 7
+	second_tap_up.pressed = false
+	second_tap_up.position = second_tap_down.position
+	showcase.call("_handle_touch_contact_at", second_tap_up, 1310)
+	_expect(
+		bool(showcase.call("_destination_activation_for_event", second_tap_up).get("ok")),
+		"dos toques breves deben activar el destino aun sin la marca nativa de Safari"
+	)
+	_expect(
+		not bool(showcase.call("_destination_activation_for_event", second_tap_up).get("ok")),
+		"el doble toque detectado debe consumirse una sola vez"
 	)
 
 	var touch_left := InputEventScreenTouch.new()
@@ -1649,6 +1675,9 @@ func _test_ios_view_gestures(
 		bool(showcase.call("_handle_view_input", touch_right)),
 		"el segundo dedo debe iniciar el gesto de cámara"
 	)
+	var base_position := showcase_camera.global_position
+	var base_basis := showcase_camera.global_basis
+	var base_fov := showcase_camera.fov
 	var base_distance := showcase_camera.global_position.distance_to(view_pivot)
 	var pinch_in := InputEventScreenDrag.new()
 	pinch_in.index = 1
@@ -1659,8 +1688,14 @@ func _test_ios_view_gestures(
 		"juntar los dedos debe consumirse como gesto de zoom"
 	)
 	_expect(
-		showcase_camera.global_position.distance_to(view_pivot) < base_distance,
+		showcase_camera.fov < base_fov,
 		"juntar los dedos debe acercar la cámara"
+	)
+	_expect(
+		showcase_camera.global_position.distance_to(base_position) < 0.0001
+		and showcase_camera.global_basis.is_equal_approx(base_basis)
+		and is_zero_approx(float(showcase.get("_viewer_yaw_rad"))),
+		"el pellizco debe conservar el centro sin introducir giro"
 	)
 	var pinch_out := InputEventScreenDrag.new()
 	pinch_out.index = 1
@@ -1668,10 +1703,10 @@ func _test_ios_view_gestures(
 	pinch_out.relative = Vector2(50.0, 0.0)
 	showcase.call("_handle_view_input", pinch_out)
 	_expect_near(
-		showcase_camera.global_position.distance_to(view_pivot),
-		base_distance,
+		showcase_camera.fov,
+		base_fov,
 		0.0001,
-		"abrir los dedos debe alejar y recuperar la distancia"
+		"abrir los dedos debe alejar y recuperar el campo de visión"
 	)
 	var twist := InputEventScreenDrag.new()
 	twist.index = 1
