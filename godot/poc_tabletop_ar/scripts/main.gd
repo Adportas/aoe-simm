@@ -30,6 +30,11 @@ const VIEW_ZOOM_FACTOR := 1.15
 const VIEW_ROTATION_STEP_RAD := PI / 12.0
 const VIEW_DRAG_RADIANS_PER_PIXEL := 0.006
 const TOUCH_GESTURE_MIN_DISTANCE_PX := 12.0
+const DOUBLE_TAP_MAX_DELAY_MSEC := 450
+const DOUBLE_TAP_MAX_DISTANCE_PX := 44.0
+const TAP_MAX_DURATION_MSEC := 320
+const TAP_MAX_TRAVEL_PX := 22.0
+const SYNTHETIC_MOUSE_AFTER_TOUCH_MSEC := 700
 
 enum DesktopCameraMode {
 	CINEMATIC,
@@ -76,15 +81,22 @@ var _next_walk_route_index := 1
 var _journey_complete := false
 var _desktop_camera_mode := DesktopCameraMode.CINEMATIC
 var _desktop_camera_base_transform := Transform3D.IDENTITY
+var _desktop_camera_base_fov_deg := 75.0
 var _desktop_camera_base_valid := false
 var _viewer_zoom := 1.0
 var _viewer_yaw_rad := 0.0
 var _touch_positions: Dictionary = {}
+var _touch_start_positions: Dictionary = {}
+var _touch_start_msec: Dictionary = {}
 var _gesture_touch_indices := PackedInt32Array()
 var _gesture_consumed_indices: Dictionary = {}
 var _multi_touch_active := false
 var _multi_touch_previous_distance := 0.0
 var _multi_touch_previous_angle := 0.0
+var _last_tap_release_msec := -DOUBLE_TAP_MAX_DELAY_MSEC * 2
+var _last_tap_position := Vector2.ZERO
+var _pending_destination_touch_index := -1
+var _last_touch_destination_msec := -SYNTHETIC_MOUSE_AFTER_TOUCH_MSEC * 2
 var _rng := RandomNumberGenerator.new()
 var biome_counts: Dictionary = {}
 var _is_web_preview := RUNTIME_PROFILE.is_web_preview()
@@ -180,7 +192,7 @@ func _handle_view_input(event: InputEvent) -> bool:
 			return true
 	if event is InputEventMagnifyGesture:
 		var magnify_event := event as InputEventMagnifyGesture
-		if magnify_event.factor > 0.0:
+		if magnify_event.factor > 0.0 and _touch_positions.is_empty():
 			_set_viewer_zoom(_viewer_zoom * magnify_event.factor)
 			return true
 	return false
@@ -189,42 +201,92 @@ func _handle_view_input(event: InputEvent) -> bool:
 func _destination_activation_for_event(event: InputEvent) -> Dictionary:
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
+		var follows_touch := (
+			Time.get_ticks_msec() - _last_touch_destination_msec
+				<= SYNTHETIC_MOUSE_AFTER_TOUCH_MSEC
+		)
 		return {
 			"ok": (
 				mouse_event.button_index == MOUSE_BUTTON_LEFT
 				and mouse_event.pressed
 				and mouse_event.double_click
+				and not follows_touch
 			),
 			"position": mouse_event.position,
 		}
 	if event is InputEventScreenTouch:
 		var touch_event := event as InputEventScreenTouch
+		var is_detected_double_tap := (
+			not touch_event.pressed
+			and _pending_destination_touch_index == touch_event.index
+		)
+		if is_detected_double_tap:
+			_pending_destination_touch_index = -1
+			_last_touch_destination_msec = Time.get_ticks_msec()
 		return {
-			"ok": touch_event.pressed and touch_event.double_tap,
+			"ok": is_detected_double_tap,
 			"position": touch_event.position,
 		}
 	return {"ok": false}
 
 
 func _handle_touch_contact(event: InputEventScreenTouch) -> bool:
+	return _handle_touch_contact_at(event, Time.get_ticks_msec())
+
+
+func _handle_touch_contact_at(
+	event: InputEventScreenTouch,
+	now_msec: int
+) -> bool:
 	if event.pressed:
 		_touch_positions[event.index] = event.position
+		_touch_start_positions[event.index] = event.position
+		_touch_start_msec[event.index] = now_msec
 		if _touch_positions.size() < 2:
 			return false
+		_pending_destination_touch_index = -1
+		_last_tap_release_msec = -DOUBLE_TAP_MAX_DELAY_MSEC * 2
 		_gesture_consumed_indices[event.index] = true
 		if not _multi_touch_active:
 			_begin_multi_touch_gesture()
 		return true
 
 	var was_gesture := _gesture_consumed_indices.has(event.index)
+	var start_position: Vector2 = _touch_start_positions.get(
+		event.index,
+		event.position
+	)
+	var start_msec := int(_touch_start_msec.get(event.index, now_msec))
+	var was_only_contact := _touch_positions.size() == 1
 	var ended_active_pair := (
 		_multi_touch_active and _gesture_touch_indices.has(event.index)
 	)
 	_touch_positions.erase(event.index)
+	_touch_start_positions.erase(event.index)
+	_touch_start_msec.erase(event.index)
 	if ended_active_pair:
 		_end_multi_touch_gesture()
 		if _touch_positions.size() >= 2:
 			_begin_multi_touch_gesture()
+	var is_clean_tap := (
+		not was_gesture
+		and was_only_contact
+		and not event.canceled
+		and now_msec - start_msec <= TAP_MAX_DURATION_MSEC
+		and event.position.distance_to(start_position) <= TAP_MAX_TRAVEL_PX
+	)
+	if is_clean_tap:
+		var completes_double_tap := (
+			now_msec - _last_tap_release_msec <= DOUBLE_TAP_MAX_DELAY_MSEC
+			and event.position.distance_to(_last_tap_position)
+				<= DOUBLE_TAP_MAX_DISTANCE_PX
+		)
+		if completes_double_tap:
+			_pending_destination_touch_index = event.index
+			_last_tap_release_msec = -DOUBLE_TAP_MAX_DELAY_MSEC * 2
+		else:
+			_last_tap_release_msec = now_msec
+			_last_tap_position = event.position
 	if _touch_positions.is_empty():
 		_gesture_consumed_indices.clear()
 	return was_gesture
@@ -284,18 +346,21 @@ func _apply_multi_touch_gesture() -> void:
 			-PI,
 			PI
 		)
-		var next_zoom := clampf(
-			_viewer_zoom * distance_ratio,
-			VIEW_ZOOM_MIN,
-			VIEW_ZOOM_MAX
-		)
-		var next_yaw := wrapf(_viewer_yaw_rad + angle_delta, -PI, PI)
-		if (
-			not is_equal_approx(next_zoom, _viewer_zoom)
-			or not is_equal_approx(next_yaw, _viewer_yaw_rad)
-		):
-			_viewer_zoom = next_zoom
-			_viewer_yaw_rad = next_yaw
+		var zoom_motion := absf(log(distance_ratio))
+		var rotation_motion := absf(angle_delta)
+		if zoom_motion >= rotation_motion:
+			_viewer_zoom = clampf(
+				_viewer_zoom * distance_ratio,
+				VIEW_ZOOM_MIN,
+				VIEW_ZOOM_MAX
+			)
+		else:
+			_viewer_yaw_rad = wrapf(
+				_viewer_yaw_rad + angle_delta,
+				-PI,
+				PI
+			)
+		if zoom_motion > 0.0001 or rotation_motion > 0.0001:
 			_apply_viewer_camera_transform()
 			_refresh_view_controls()
 	_multi_touch_previous_distance = current_distance
@@ -356,6 +421,7 @@ func _build_world() -> void:
 	camera.current = true
 	camera.near = 0.005
 	camera.far = 20.0
+	_desktop_camera_base_fov_deg = camera.fov
 	add_child(camera)
 	_set_desktop_camera(false)
 
@@ -906,9 +972,13 @@ func _apply_viewer_camera_transform() -> void:
 	var orbit := Basis(vertical_axis, _viewer_yaw_rad)
 	var result := _desktop_camera_base_transform
 	var base_offset := _desktop_camera_base_transform.origin - pivot
-	result.origin = pivot + orbit * (base_offset * _viewer_zoom)
+	result.origin = pivot + orbit * base_offset
 	result.basis = orbit * _desktop_camera_base_transform.basis
 	camera.global_transform = result
+	camera.fov = rad_to_deg(2.0 * atan(
+		tan(deg_to_rad(_desktop_camera_base_fov_deg) * 0.5)
+			* _viewer_zoom
+	))
 
 
 func _refresh_view_controls() -> void:
@@ -939,15 +1009,18 @@ func _set_desktop_camera_mode(mode: int) -> void:
 	match _desktop_camera_mode:
 		DesktopCameraMode.CINEMATIC:
 			camera.fov = 32.0
+			_desktop_camera_base_fov_deg = camera.fov
 			_frame_cinematic_segment(
 				Vector2(unit.position.x, unit.position.z),
 				unit.target_xz
 			)
 		DesktopCameraMode.OVERVIEW:
 			camera.fov = 36.0
+			_desktop_camera_base_fov_deg = camera.fov
 			_set_desktop_camera(false)
 		DesktopCameraMode.TOP:
 			camera.fov = 50.0
+			_desktop_camera_base_fov_deg = camera.fov
 			_set_desktop_camera(true)
 	_refresh_camera_button()
 
