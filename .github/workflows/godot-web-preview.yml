@@ -48,11 +48,17 @@ jobs:
         shell: bash
         run: |
           export_directory="$GITHUB_WORKSPACE/build/web-preview"
+          asset_name="aoe-simm-${GITHUB_SHA:0:12}"
           mkdir -p "$export_directory"
           godot --headless --path "$PROJECT_PATH" \
-            --export-release "Web Preview" "$export_directory/index.html"
+            --export-release "Web Preview" "$export_directory/$asset_name.html"
+          mv "$export_directory/$asset_name.html" "$export_directory/index.html"
           touch "$export_directory/.nojekyll"
-          for required_file in index.html index.js index.wasm index.pck; do
+          for required_file in \
+            index.html \
+            "$asset_name.js" \
+            "$asset_name.wasm" \
+            "$asset_name.pck"; do
             test -s "$export_directory/$required_file"
           done
           du -sh "$export_directory"

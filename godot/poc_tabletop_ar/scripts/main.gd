@@ -35,6 +35,11 @@ const DOUBLE_TAP_MAX_DISTANCE_PX := 44.0
 const TAP_MAX_DURATION_MSEC := 320
 const TAP_MAX_TRAVEL_PX := 22.0
 const SYNTHETIC_MOUSE_AFTER_TOUCH_MSEC := 700
+const WEB_CAMERA_IDLE := 0
+const WEB_CAMERA_REQUESTING := 1
+const WEB_CAMERA_RUNNING := 2
+const WEB_CAMERA_DENIED := 3
+const WEB_CAMERA_ERROR := 4
 
 enum DesktopCameraMode {
 	CINEMATIC,
@@ -47,6 +52,7 @@ var diorama_root: Node3D
 var terrain_instance: MeshInstance3D
 var terrain_material: ShaderMaterial
 var ocean_instance: MeshInstance3D
+var ocean_floor_instance: MeshInstance3D
 var ocean_material: ShaderMaterial
 var unit: UnitController
 var target_marker: MeshInstance3D
@@ -62,6 +68,7 @@ var capture_corner_button: Button
 var grid_button: Button
 var walk_button: Button
 var camera_button: Button
+var web_ar_button: Button
 var zoom_out_button: Button
 var zoom_in_button: Button
 var rotate_left_button: Button
@@ -74,6 +81,8 @@ var _detected_plane_count := 0
 var _mesh_anchor_count := 0
 var _grid_enabled := false
 var _is_ar_mode := false
+var _is_web_camera_ar_mode := false
+var _web_camera_request_pending := false
 var _status_accumulator := 0.0
 var _marker_phase := 0.0
 var _auto_walk_enabled := true
@@ -118,6 +127,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if is_instance_valid(ar_adapter):
 		ar_adapter.stop()
+	_stop_web_camera_bridge()
 
 
 func _process(delta: float) -> void:
@@ -130,6 +140,7 @@ func _process(delta: float) -> void:
 	_status_accumulator += delta
 	if _status_accumulator >= 0.15:
 		_status_accumulator = 0.0
+		_poll_web_camera_state()
 		_refresh_status()
 
 
@@ -524,21 +535,21 @@ func _configure_terrain_material() -> void:
 
 
 func _build_ocean() -> void:
-	var ocean_floor := MeshInstance3D.new()
-	ocean_floor.name = "OceanFloor_Extended"
+	ocean_floor_instance = MeshInstance3D.new()
+	ocean_floor_instance.name = "OceanFloor_Extended"
 	var floor_mesh := PlaneMesh.new()
 	floor_mesh.size = Vector2(1600.0, 1800.0)
-	ocean_floor.mesh = floor_mesh
-	ocean_floor.position.y = -14.82
-	ocean_floor.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	ocean_floor_instance.mesh = floor_mesh
+	ocean_floor_instance.position.y = -14.82
+	ocean_floor_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var floor_material := ShaderMaterial.new()
 	floor_material.shader = load(OCEAN_FLOOR_SHADER_PATH)
 	floor_material.set_shader_parameter(
 		"sand_normal",
 		load(GROUND_TEXTURE_ROOT + "ground_sand_normal.png") as Texture2D
 	)
-	ocean_floor.material_override = floor_material
-	diorama_root.add_child(ocean_floor)
+	ocean_floor_instance.material_override = floor_material
+	diorama_root.add_child(ocean_floor_instance)
 
 	ocean_instance = MeshInstance3D.new()
 	ocean_instance.name = "Ocean_400x720m"
@@ -641,6 +652,14 @@ func _build_interface() -> void:
 	actions.add_child(grid_button)
 	camera_button = _make_button("Cámara: plano fijo", _on_cycle_camera)
 	actions.add_child(camera_button)
+	web_ar_button = _make_button("Probar AR con cámara", _on_toggle_web_camera_ar)
+	web_ar_button.name = "WebARButton"
+	web_ar_button.tooltip_text = (
+		"Superpone el diorama sobre la cámara trasera. "
+		+ "Safari no permite anclarlo a una superficie desde la web."
+	)
+	web_ar_button.visible = OS.has_feature("web")
+	actions.add_child(web_ar_button)
 
 	var view_controls := GridContainer.new()
 	view_controls.name = "ViewControls"
@@ -704,6 +723,7 @@ func _build_interface() -> void:
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	interface_layer.add_child(crosshair)
 	_refresh_view_controls()
+	_refresh_web_ar_button()
 
 
 func _make_button(text_value: String, callback: Callable) -> Button:
@@ -711,6 +731,113 @@ func _make_button(text_value: String, callback: Callable) -> Button:
 	button.text = text_value
 	button.pressed.connect(callback)
 	return button
+
+
+func _on_toggle_web_camera_ar() -> void:
+	if not OS.has_feature("web"):
+		return
+	if _is_web_camera_ar_mode or _web_camera_request_pending:
+		_web_camera_request_pending = false
+		_stop_web_camera_bridge()
+		_set_web_camera_ar_mode(false)
+		_ar_status = "Vista web optimizada · AR de cámara detenido"
+		_refresh_web_ar_button()
+		return
+	if not _web_camera_bridge_available():
+		_ar_status = "Este export web no incluye el puente de cámara"
+		return
+	_web_camera_request_pending = true
+	_ar_status = "Solicitando permiso para usar la cámara trasera…"
+	_refresh_web_ar_button()
+	JavaScriptBridge.eval("window.aoeAR.startCamera()", true)
+
+
+func _web_camera_bridge_available() -> bool:
+	if not OS.has_feature("web"):
+		return false
+	return bool(JavaScriptBridge.eval(
+		"Boolean(window.aoeAR && window.aoeAR.startCamera)",
+		true
+	))
+
+
+func _poll_web_camera_state() -> void:
+	if (
+		not OS.has_feature("web")
+		or not (_web_camera_request_pending or _is_web_camera_ar_mode)
+		or not _web_camera_bridge_available()
+	):
+		return
+	var state := int(JavaScriptBridge.eval("window.aoeAR.stateCode", true))
+	match state:
+		WEB_CAMERA_REQUESTING:
+			_web_camera_request_pending = true
+		WEB_CAMERA_RUNNING:
+			_web_camera_request_pending = false
+			if not _is_web_camera_ar_mode:
+				_set_web_camera_ar_mode(true)
+		WEB_CAMERA_DENIED, WEB_CAMERA_ERROR:
+			_web_camera_request_pending = false
+			_set_web_camera_ar_mode(false)
+			_ar_status = str(JavaScriptBridge.eval(
+				"window.aoeAR.statusMessage || 'No fue posible abrir la cámara'",
+				true
+			))
+		WEB_CAMERA_IDLE:
+			_web_camera_request_pending = false
+			if _is_web_camera_ar_mode:
+				_set_web_camera_ar_mode(false)
+				_ar_status = "La cámara web se detuvo"
+	_refresh_web_ar_button()
+
+
+func _set_web_camera_ar_mode(enabled: bool) -> void:
+	_is_web_camera_ar_mode = enabled
+	if not is_instance_valid(environment):
+		return
+	get_viewport().transparent_bg = enabled
+	environment.fog_enabled = not enabled
+	if is_instance_valid(ocean_instance):
+		ocean_instance.visible = not enabled
+	if is_instance_valid(ocean_floor_instance):
+		ocean_floor_instance.visible = not enabled
+	if enabled:
+		environment.background_mode = Environment.BG_COLOR
+		environment.background_color = Color(0.0, 0.0, 0.0, 0.0)
+		_set_desktop_camera_mode(DesktopCameraMode.OVERVIEW)
+		_ar_status = "AR de cámara activo · vista sin anclaje espacial"
+		instruction_label.text = (
+			"Cámara activa: ajusta tamaño y giro con dos dedos. "
+			+ "En Safari el diorama aún no queda fijado a la mesa al mover el teléfono."
+		)
+	else:
+		environment.background_mode = Environment.BG_SKY
+		environment.fog_enabled = true
+		if is_instance_valid(instruction_label):
+			instruction_label.text = (
+				"El aldeano cruza hacia las rocas. Haz doble clic o doble toque "
+				+ "sobre el terreno para darle un destino manual."
+			)
+	_refresh_web_ar_button()
+	_refresh_view_controls()
+
+
+func _stop_web_camera_bridge() -> void:
+	if OS.has_feature("web") and _web_camera_bridge_available():
+		JavaScriptBridge.eval("window.aoeAR.stopCamera()", true)
+
+
+func _refresh_web_ar_button() -> void:
+	if not is_instance_valid(web_ar_button):
+		return
+	web_ar_button.visible = OS.has_feature("web")
+	web_ar_button.disabled = _web_camera_request_pending
+	if _web_camera_request_pending:
+		web_ar_button.text = "Abriendo cámara…"
+	elif _is_web_camera_ar_mode:
+		web_ar_button.text = "Salir de AR"
+	else:
+		web_ar_button.text = "Probar AR con cámara"
 
 
 func _start_runtime_mode() -> void:
@@ -738,7 +865,7 @@ func _start_runtime_mode() -> void:
 		)
 	else:
 		_ar_status = (
-			"Vista web optimizada (ARKit solo está disponible en iOS)"
+			"Vista web optimizada · AR de cámara disponible"
 			if _is_web_preview
 			else "Simulador de escritorio (ARKit se activará en iOS)"
 		)
@@ -997,7 +1124,8 @@ func _refresh_view_controls() -> void:
 		return
 	var zoom_percent := roundi(100.0 / _viewer_zoom)
 	var yaw_degrees := roundi(rad_to_deg(_viewer_yaw_rad))
-	view_status_label.text = "Zoom %d%% · giro %d°" % [
+	var mode_prefix := "AR cámara · " if _is_web_camera_ar_mode else ""
+	view_status_label.text = mode_prefix + "Zoom %d%% · giro %d°" % [
 		zoom_percent,
 		yaw_degrees,
 	]
@@ -1220,13 +1348,16 @@ func _refresh_status() -> void:
 	)
 	var camera_status := "AR"
 	if not _is_ar_mode:
-		match _desktop_camera_mode:
-			DesktopCameraMode.CINEMATIC:
-				camera_status = "plano fijo"
-			DesktopCameraMode.OVERVIEW:
-				camera_status = "general"
-			_:
-				camera_status = "cenital"
+		if _is_web_camera_ar_mode:
+			camera_status = "AR cámara"
+		else:
+			match _desktop_camera_mode:
+				DesktopCameraMode.CINEMATIC:
+					camera_status = "plano fijo"
+				DesktopCameraMode.OVERVIEW:
+					camera_status = "general"
+				_:
+					camera_status = "cenital"
 	var camera_diagnostic := ""
 	var biome_instance_count := 0
 	for count in biome_counts.values():

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8">
+		<meta
+			name="viewport"
+			content="width=device-width, user-scalable=no, initial-scale=1.0, viewport-fit=cover"
+		>
+		<title>$GODOT_PROJECT_NAME</title>
+		<style>
+html,
+body,
+#canvas,
+#aoe-ar-camera {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+html,
+body {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+body {
+	color: white;
+	background: #000;
+	touch-action: none;
+}
+
+#aoe-ar-camera,
+#canvas {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+}
+
+#aoe-ar-camera {
+	display: none;
+	z-index: 0;
+	object-fit: cover;
+	pointer-events: none;
+	background: #000;
+}
+
+body.aoe-camera-ar-active #aoe-ar-camera {
+	display: block;
+}
+
+#canvas {
+	display: block;
+	z-index: 1;
+	background: transparent;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+#status {
+	position: fixed;
+	inset: 0;
+	z-index: 5;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	background: #06101a;
+}
+
+#status-splash {
+	max-width: 100%;
+	max-height: 100%;
+	margin: auto;
+}
+
+#status-splash.show-image--false {
+	display: none;
+}
+
+#status-splash.fullsize--true {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+#status-splash.use-filter--false {
+	image-rendering: pixelated;
+}
+
+#status-progress {
+	position: absolute;
+	left: 25%;
+	right: 25%;
+	bottom: max(10%, env(safe-area-inset-bottom));
+	width: 50%;
+}
+
+#status-notice {
+	display: none;
+	max-width: min(34rem, calc(100% - 3rem));
+	padding: 1rem;
+	border: 1px solid #9b3943;
+	border-radius: 0.5rem;
+	background: #5b3943;
+	font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	text-align: center;
+}
+		</style>
+		$GODOT_HEAD_INCLUDE
+	</head>
+	<body>
+		<video id="aoe-ar-camera" autoplay muted playsinline aria-hidden="true"></video>
+		<canvas id="canvas">
+			Tu navegador no admite el elemento canvas.
+		</canvas>
+		<noscript>Esta experiencia necesita JavaScript.</noscript>
+
+		<div id="status">
+			<img
+				id="status-splash"
+				class="$GODOT_SPLASH_CLASSES"
+				src="$GODOT_SPLASH"
+				alt=""
+			>
+			<progress id="status-progress"></progress>
+			<div id="status-notice"></div>
+		</div>
+
+		<script>
+(function () {
+	"use strict";
+	const video = document.getElementById("aoe-ar-camera");
+	const api = {
+		stateCode: 0,
+		statusMessage: "Cámara inactiva",
+		stream: null,
+
+		setState: function (code, message) {
+			this.stateCode = code;
+			this.statusMessage = message;
+			document.body.classList.toggle("aoe-camera-ar-active", code === 2);
+		},
+
+		startCamera: function () {
+			if (this.stateCode === 1 || this.stateCode === 2) {
+				return;
+			}
+			if (!window.isSecureContext) {
+				this.setState(4, "La cámara web requiere una conexión HTTPS segura.");
+				return;
+			}
+			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+				this.setState(4, "Este navegador no permite usar la cámara desde la web.");
+				return;
+			}
+
+			this.setState(1, "Solicitando permiso para la cámara trasera…");
+			const constraints = {
+				audio: false,
+				video: {
+					facingMode: { ideal: "environment" },
+					width: { ideal: 1920 },
+					height: { ideal: 1080 }
+				}
+			};
+			navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+				this.stream = stream;
+				video.srcObject = stream;
+				const tracks = stream.getVideoTracks();
+				if (tracks.length > 0) {
+					tracks[0].addEventListener("ended", () => {
+						if (this.stream === stream) {
+							this.stopCamera();
+						}
+					});
+				}
+				return video.play();
+			}).then(() => {
+				this.setState(2, "Cámara trasera activa");
+			}).catch((error) => {
+				if (this.stream) {
+					this.stream.getTracks().forEach((track) => track.stop());
+				}
+				this.stream = null;
+				video.srcObject = null;
+				const denied = error && (
+					error.name === "NotAllowedError"
+					|| error.name === "PermissionDeniedError"
+				);
+				if (denied) {
+					this.setState(
+						3,
+						"Permiso de cámara denegado. Habilítalo para este sitio en Safari y vuelve a intentar."
+					);
+					return;
+				}
+				const detail = error && error.message ? ": " + error.message : "";
+				this.setState(4, "No fue posible abrir la cámara trasera" + detail);
+			});
+		},
+
+		stopCamera: function () {
+			const stream = this.stream;
+			this.stream = null;
+			if (stream) {
+				stream.getTracks().forEach((track) => track.stop());
+			}
+			video.pause();
+			video.srcObject = null;
+			this.setState(0, "Cámara inactiva");
+		}
+	};
+
+	window.aoeAR = api;
+	window.addEventListener("pagehide", () => api.stopCamera());
+}());
+		</script>
+		<script src="$GODOT_URL"></script>
+		<script>
+(function () {
+	"use strict";
+	const config = $GODOT_CONFIG;
+	const engine = new Engine(config);
+	const status = document.getElementById("status");
+	const progress = document.getElementById("status-progress");
+	const notice = document.getElementById("status-notice");
+
+	function fail(error) {
+		console.error(error);
+		progress.style.display = "none";
+		notice.style.display = "block";
+		notice.textContent = error instanceof Error
+			? error.message
+			: String(error || "No fue posible iniciar el visor.");
+	}
+
+	const missing = Engine.getMissingFeatures({ threads: false });
+	if (missing.length > 0) {
+		fail("El navegador no incluye estas funciones requeridas: " + missing.join(", "));
+		return;
+	}
+
+	engine.startGame({
+		onProgress: function (current, total) {
+			if (current > 0 && total > 0) {
+				progress.value = current;
+				progress.max = total;
+			} else {
+				progress.removeAttribute("value");
+				progress.removeAttribute("max");
+			}
+		}
+	}).then(() => status.remove(), fail);
+}());
+		</script>
+	</body>
+</html>

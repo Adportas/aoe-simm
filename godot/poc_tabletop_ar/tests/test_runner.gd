@@ -19,6 +19,7 @@ func _run() -> void:
 	_test_unit_ground_following()
 	_test_mesh_shape()
 	_test_web_preview_profile()
+	_test_web_ar_shell()
 	_test_island_biome_assets()
 	_test_blender_character()
 	_test_villager_asset()
@@ -700,6 +701,32 @@ func _test_web_preview_profile() -> void:
 	)
 
 
+func _test_web_ar_shell() -> void:
+	var shell := FileAccess.get_file_as_string("res://web/aoe_ar_shell.html")
+	_expect(not shell.is_empty(), "el export web debe incluir su shell AR")
+	_expect(
+		"$GODOT_URL" in shell and "$GODOT_CONFIG" in shell,
+		"el shell AR debe conservar los marcadores requeridos por Godot"
+	)
+	_expect(
+		"navigator.mediaDevices.getUserMedia" in shell
+		and 'facingMode: { ideal: "environment" }' in shell
+		and "playsinline" in shell,
+		"el shell AR debe solicitar la cámara trasera compatible con Safari"
+	)
+	_expect(
+		"pagehide" in shell and "stopCamera" in shell,
+		"el shell AR debe apagar la cámara al abandonar la página"
+	)
+	var web_preset := FileAccess.get_file_as_string(
+		"res://export_presets.web.example"
+	)
+	_expect(
+		'html/custom_html_shell="res://web/aoe_ar_shell.html"' in web_preset,
+		"el preset web debe exportar con el shell de cámara"
+	)
+
+
 func _test_island_biome_assets() -> void:
 	var expected_total := 0
 	for definition in ISLAND_BIOME_BUILDER.ASSET_DEFINITIONS:
@@ -1227,6 +1254,9 @@ func _test_walking_showcase() -> void:
 	var controller := showcase.get("unit") as UnitController
 	var showcase_camera := showcase.get("camera") as Camera3D
 	var showcase_ocean := showcase.get("ocean_instance") as MeshInstance3D
+	var showcase_ocean_floor := (
+		showcase.get("ocean_floor_instance") as MeshInstance3D
+	)
 	var biome_counts: Dictionary = showcase.get("biome_counts")
 	var showcase_environment := showcase.get("environment") as Environment
 	var physical_table := showcase.get("physical_table") as MeshInstance3D
@@ -1236,6 +1266,7 @@ func _test_walking_showcase() -> void:
 	var zoom_in_button := showcase.get("zoom_in_button") as Button
 	var rotate_left_button := showcase.get("rotate_left_button") as Button
 	var rotate_right_button := showcase.get("rotate_right_button") as Button
+	var web_ar_button := showcase.get("web_ar_button") as Button
 	var view_status_label := showcase.get("view_status_label") as Label
 	_expect(controller != null, "el paisaje debe instanciar un controlador de aldeano")
 	_expect(showcase_camera != null, "el paseo debe crear una cámara")
@@ -1250,6 +1281,10 @@ func _test_walking_showcase() -> void:
 	_expect(
 		view_status_label != null and "Zoom 100%" in view_status_label.text,
 		"el visor debe informar el nivel de zoom actual"
+	)
+	_expect(
+		web_ar_button != null and web_ar_button.text == "Probar AR con cámara",
+		"el visor web debe crear un control explícito para probar la cámara"
 	)
 	if showcase_ocean != null:
 		_expect_near(
@@ -1598,6 +1633,35 @@ func _test_walking_showcase() -> void:
 				+ "(distancia %.2f m)" % nearest_outcrop_distance
 			)
 		)
+	showcase.call("_set_web_camera_ar_mode", true)
+	_expect(
+		bool(showcase.get("_is_web_camera_ar_mode"))
+		and showcase.get_viewport().transparent_bg
+		and showcase_environment.background_mode == Environment.BG_COLOR
+		and not showcase_environment.fog_enabled,
+		"el modo AR web debe transparentar el fondo 3D para revelar el video"
+	)
+	_expect(
+		not showcase_ocean.visible
+		and showcase_ocean_floor != null
+		and not showcase_ocean_floor.visible,
+		"el modo AR web debe ocultar los planos oceánicos que taparían la cámara"
+	)
+	_expect(
+		web_ar_button.text == "Salir de AR"
+		and "AR cámara" in view_status_label.text,
+		"la interfaz debe reflejar que la composición AR está activa"
+	)
+	showcase.call("_set_web_camera_ar_mode", false)
+	_expect(
+		not bool(showcase.get("_is_web_camera_ar_mode"))
+		and not showcase.get_viewport().transparent_bg
+		and showcase_environment.background_mode == Environment.BG_SKY
+		and showcase_environment.fog_enabled
+		and showcase_ocean.visible
+		and showcase_ocean_floor.visible,
+		"salir de AR debe restaurar por completo la vista web normal"
+	)
 	showcase.queue_free()
 
 
