@@ -108,6 +108,14 @@ python3 -m http.server 8060 --directory exports/web-preview
 Abrir `http://localhost:8060`. El exportador usa
 `export_presets.web.example` temporalmente y restaura cualquier
 `export_presets.cfg` existente, por lo que no pisa la configuración iOS.
+
+El panel del visor incluye **Alejar**, **Acercar** y giro de 15° en ambos
+sentidos alrededor del eje vertical central de la isla. También se puede usar
+la rueda del mouse o las teclas `+`/`−` para zoom, `Q`/`E` para girar,
+arrastrar con el botón derecho para un giro continuo y `R` para restaurar el
+encuadre. En pantallas táctiles, un arrastre horizontal gira la vista; un toque
+corto sigue marcando el destino del aldeano.
+
 Para validar con una plantilla descargada fuera de la instalación de Godot:
 
 ```sh

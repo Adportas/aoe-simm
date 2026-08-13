@@ -1232,9 +1232,25 @@ func _test_walking_showcase() -> void:
 	var physical_table := showcase.get("physical_table") as MeshInstance3D
 	var terrain_material := showcase.get("terrain_material") as ShaderMaterial
 	var diorama_root := showcase.get("diorama_root") as Node3D
+	var zoom_out_button := showcase.get("zoom_out_button") as Button
+	var zoom_in_button := showcase.get("zoom_in_button") as Button
+	var rotate_left_button := showcase.get("rotate_left_button") as Button
+	var rotate_right_button := showcase.get("rotate_right_button") as Button
+	var view_status_label := showcase.get("view_status_label") as Label
 	_expect(controller != null, "el paisaje debe instanciar un controlador de aldeano")
 	_expect(showcase_camera != null, "el paseo debe crear una cámara")
 	_expect(showcase_ocean != null, "el paisaje debe incluir el océano alrededor de la isla")
+	_expect(
+		zoom_out_button != null
+		and zoom_in_button != null
+		and rotate_left_button != null
+		and rotate_right_button != null,
+		"el visor debe exponer controles de zoom y giro en ambos sentidos"
+	)
+	_expect(
+		view_status_label != null and "Zoom 100%" in view_status_label.text,
+		"el visor debe informar el nivel de zoom actual"
+	)
 	if showcase_ocean != null:
 		_expect_near(
 			showcase_ocean.position.y,
@@ -1374,6 +1390,72 @@ func _test_walking_showcase() -> void:
 			) < 0.01,
 			"el aldeano debe partir del extremo izquierdo de la isla"
 		)
+		if (
+			showcase_camera != null
+			and diorama_root != null
+			and zoom_out_button != null
+			and zoom_in_button != null
+			and rotate_left_button != null
+			and rotate_right_button != null
+		):
+			var base_camera_position := showcase_camera.global_position
+			var view_pivot := diorama_root.global_position
+			var base_camera_distance := base_camera_position.distance_to(view_pivot)
+			zoom_in_button.pressed.emit()
+			_expect(
+				showcase_camera.global_position.distance_to(view_pivot)
+					< base_camera_distance,
+				"Acercar debe reducir la distancia al centro del diorama"
+			)
+			zoom_out_button.pressed.emit()
+			_expect_near(
+				showcase_camera.global_position.distance_to(view_pivot),
+				base_camera_distance,
+				0.0001,
+				"Alejar debe recuperar la distancia anterior"
+			)
+			rotate_right_button.pressed.emit()
+			_expect(
+				showcase_camera.global_position.distance_to(base_camera_position)
+					> 0.01,
+				"Girar debe orbitar la cámara alrededor del eje vertical central"
+			)
+			_expect_near(
+				showcase_camera.global_position.distance_to(view_pivot),
+				base_camera_distance,
+				0.0001,
+				"el giro debe conservar la distancia al centro"
+			)
+			_expect_near(
+				float(showcase.get("_viewer_yaw_rad")),
+				float(showcase.VIEW_ROTATION_STEP_RAD),
+				0.0001,
+				"el botón de giro debe avanzar 15 grados"
+			)
+			rotate_left_button.pressed.emit()
+			_expect_near(
+				float(showcase.get("_viewer_yaw_rad")),
+				0.0,
+				0.0001,
+				"los giros opuestos deben cancelarse"
+			)
+			var zoom_key := InputEventKey.new()
+			zoom_key.pressed = true
+			zoom_key.keycode = KEY_EQUAL
+			_expect(
+				bool(showcase.call("_handle_view_input", zoom_key)),
+				"la tecla + debe activar el zoom"
+			)
+			_expect(
+				float(showcase.get("_viewer_zoom")) < 1.0,
+				"el atajo + debe acercar la vista"
+			)
+			showcase.call("_reset_view")
+			_expect(
+				showcase_camera.global_position.distance_to(base_camera_position)
+					< 0.0001,
+				"restaurar debe recuperar el encuadre base"
+			)
 		var initial_camera_position := showcase_camera.global_position
 		var camera_inverse := showcase_camera.global_transform.affine_inverse()
 		var start_in_camera: Vector3 = camera_inverse * showcase.calibration.simulation_to_world(

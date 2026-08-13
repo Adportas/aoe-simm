@@ -24,6 +24,12 @@ const SHOT_SIDE_OFFSET_M := 0.115
 const SHOT_HEIGHT_M := 0.075
 const SHOT_TERRAIN_CLEARANCE_M := 0.050
 const CINEMATIC_CHARACTER_BOOST := 1.85
+const VIEW_ZOOM_MIN := 0.55
+const VIEW_ZOOM_MAX := 2.0
+const VIEW_ZOOM_FACTOR := 1.15
+const VIEW_ROTATION_STEP_RAD := PI / 12.0
+const VIEW_DRAG_RADIANS_PER_PIXEL := 0.006
+const TOUCH_ROTATION_THRESHOLD_PX := 8.0
 
 enum DesktopCameraMode {
 	CINEMATIC,
@@ -51,6 +57,11 @@ var capture_corner_button: Button
 var grid_button: Button
 var walk_button: Button
 var camera_button: Button
+var zoom_out_button: Button
+var zoom_in_button: Button
+var rotate_left_button: Button
+var rotate_right_button: Button
+var view_status_label: Label
 var crosshair: Label
 var _captured_corners := PackedVector3Array()
 var _ar_status := "Simulador de escritorio"
@@ -64,6 +75,13 @@ var _auto_walk_enabled := true
 var _next_walk_route_index := 1
 var _journey_complete := false
 var _desktop_camera_mode := DesktopCameraMode.CINEMATIC
+var _desktop_camera_base_transform := Transform3D.IDENTITY
+var _desktop_camera_base_valid := false
+var _viewer_zoom := 1.0
+var _viewer_yaw_rad := 0.0
+var _active_touch_index := -1
+var _touch_start_position := Vector2.ZERO
+var _touch_dragged := false
 var _rng := RandomNumberGenerator.new()
 var biome_counts: Dictionary = {}
 var _is_web_preview := RUNTIME_PROFILE.is_web_preview()
@@ -101,6 +119,10 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _handle_view_input(event):
+		get_viewport().set_input_as_handled()
+		return
+
 	var screen_position := Vector2.ZERO
 	var pressed := false
 	if event is InputEventMouseButton:
@@ -109,8 +131,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		screen_position = mouse_event.position
 	elif event is InputEventScreenTouch:
 		var touch_event := event as InputEventScreenTouch
-		pressed = touch_event.pressed
-		screen_position = touch_event.position
+		if _is_ar_mode:
+			pressed = touch_event.pressed
+			screen_position = touch_event.position
+		elif touch_event.pressed and _active_touch_index < 0:
+			_active_touch_index = touch_event.index
+			_touch_start_position = touch_event.position
+			_touch_dragged = false
+			return
+		elif not touch_event.pressed and touch_event.index == _active_touch_index:
+			pressed = not _touch_dragged
+			screen_position = touch_event.position
+			_active_touch_index = -1
+			_touch_dragged = false
 	if not pressed or not calibration.is_valid:
 		return
 
@@ -118,6 +151,61 @@ func _unhandled_input(event: InputEvent) -> void:
 	if hit.get("ok", false):
 		_set_manual_target(hit["position"])
 		get_viewport().set_input_as_handled()
+
+
+func _handle_view_input(event: InputEvent) -> bool:
+	if _is_ar_mode:
+		return false
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if not key_event.pressed or key_event.echo:
+			return false
+		match key_event.keycode:
+			KEY_EQUAL, KEY_KP_ADD:
+				_on_zoom_in()
+				return true
+			KEY_MINUS, KEY_KP_SUBTRACT:
+				_on_zoom_out()
+				return true
+			KEY_Q:
+				_on_rotate_left()
+				return true
+			KEY_E:
+				_on_rotate_right()
+				return true
+			KEY_R, KEY_HOME:
+				_reset_view()
+				return true
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if not mouse_event.pressed:
+			return false
+		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_on_zoom_in()
+			return true
+		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_on_zoom_out()
+			return true
+	if event is InputEventMouseMotion:
+		var motion_event := event as InputEventMouseMotion
+		if motion_event.button_mask & MOUSE_BUTTON_MASK_RIGHT:
+			_rotate_view(-motion_event.relative.x * VIEW_DRAG_RADIANS_PER_PIXEL)
+			return true
+	if event is InputEventScreenDrag:
+		var drag_event := event as InputEventScreenDrag
+		if drag_event.index != _active_touch_index:
+			return false
+		if drag_event.position.distance_to(_touch_start_position) >= TOUCH_ROTATION_THRESHOLD_PX:
+			_touch_dragged = true
+		if _touch_dragged:
+			_rotate_view(-drag_event.relative.x * VIEW_DRAG_RADIANS_PER_PIXEL)
+			return true
+	if event is InputEventMagnifyGesture:
+		var magnify_event := event as InputEventMagnifyGesture
+		if magnify_event.factor > 0.0:
+			_set_viewer_zoom(_viewer_zoom / magnify_event.factor)
+			return true
+	return false
 
 
 func _build_camera_background() -> void:
@@ -394,6 +482,41 @@ func _build_interface() -> void:
 	camera_button = _make_button("Cámara: plano fijo", _on_cycle_camera)
 	actions.add_child(camera_button)
 
+	var view_controls := GridContainer.new()
+	view_controls.name = "ViewControls"
+	view_controls.columns = 4
+	view_controls.add_theme_constant_override("h_separation", 7)
+	view_controls.add_theme_constant_override("v_separation", 7)
+	panel_content.add_child(view_controls)
+	zoom_out_button = _make_button("− Alejar", _on_zoom_out)
+	zoom_out_button.name = "ZoomOutButton"
+	zoom_out_button.tooltip_text = "Alejar la cámara (− o rueda hacia abajo)"
+	view_controls.add_child(zoom_out_button)
+	zoom_in_button = _make_button("+ Acercar", _on_zoom_in)
+	zoom_in_button.name = "ZoomInButton"
+	zoom_in_button.tooltip_text = "Acercar la cámara (+ o rueda hacia arriba)"
+	view_controls.add_child(zoom_in_button)
+	rotate_left_button = _make_button("↺ 15°", _on_rotate_left)
+	rotate_left_button.name = "RotateLeftButton"
+	rotate_left_button.tooltip_text = "Girar alrededor del eje central hacia la izquierda (Q)"
+	view_controls.add_child(rotate_left_button)
+	rotate_right_button = _make_button("15° ↻", _on_rotate_right)
+	rotate_right_button.name = "RotateRightButton"
+	rotate_right_button.tooltip_text = "Girar alrededor del eje central hacia la derecha (E)"
+	view_controls.add_child(rotate_right_button)
+
+	view_status_label = Label.new()
+	view_status_label.name = "ViewStatus"
+	view_status_label.add_theme_font_size_override("font_size", 13)
+	view_status_label.text = "Zoom 100% · giro 0°"
+	panel_content.add_child(view_status_label)
+	var view_hint := Label.new()
+	view_hint.text = "Rueda o +/−: zoom · Q/E o arrastre derecho: girar · R: restaurar"
+	view_hint.add_theme_color_override("font_color", Color(0.68, 0.78, 0.85))
+	view_hint.add_theme_font_size_override("font_size", 12)
+	view_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel_content.add_child(view_hint)
+
 	capture_corner_button = _make_button("Capturar esquina 1", _on_capture_corner)
 	capture_corner_button.visible = false
 	panel_content.add_child(capture_corner_button)
@@ -417,6 +540,7 @@ func _build_interface() -> void:
 	crosshair.size = Vector2(24.0, 48.0)
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	interface_layer.add_child(crosshair)
+	_refresh_view_controls()
 
 
 func _make_button(text_value: String, callback: Callable) -> Button:
@@ -437,6 +561,7 @@ func _start_runtime_mode() -> void:
 	_is_ar_mode = ar_adapter.start()
 	crosshair.visible = _is_ar_mode
 	_refresh_camera_button()
+	_refresh_view_controls()
 	if _is_ar_mode:
 		calibration.clear()
 		diorama_root.visible = false
@@ -619,6 +744,97 @@ func _on_cycle_camera() -> void:
 			_set_desktop_camera_mode(DesktopCameraMode.CINEMATIC)
 
 
+func _on_zoom_out() -> void:
+	_set_viewer_zoom(_viewer_zoom * VIEW_ZOOM_FACTOR)
+
+
+func _on_zoom_in() -> void:
+	_set_viewer_zoom(_viewer_zoom / VIEW_ZOOM_FACTOR)
+
+
+func _on_rotate_left() -> void:
+	_rotate_view(-VIEW_ROTATION_STEP_RAD)
+
+
+func _on_rotate_right() -> void:
+	_rotate_view(VIEW_ROTATION_STEP_RAD)
+
+
+func _set_viewer_zoom(value: float) -> void:
+	if _is_ar_mode:
+		return
+	_viewer_zoom = clampf(value, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX)
+	_apply_viewer_camera_transform()
+	_refresh_view_controls()
+
+
+func _rotate_view(delta_radians: float) -> void:
+	if _is_ar_mode or is_zero_approx(delta_radians):
+		return
+	_viewer_yaw_rad = wrapf(_viewer_yaw_rad + delta_radians, -PI, PI)
+	_apply_viewer_camera_transform()
+	_refresh_view_controls()
+
+
+func _reset_view() -> void:
+	if _is_ar_mode:
+		return
+	_viewer_zoom = 1.0
+	_viewer_yaw_rad = 0.0
+	_apply_viewer_camera_transform()
+	_refresh_view_controls()
+
+
+func _capture_desktop_camera_base() -> void:
+	if _is_ar_mode or not is_instance_valid(camera):
+		return
+	_desktop_camera_base_transform = camera.global_transform
+	_desktop_camera_base_valid = true
+	_apply_viewer_camera_transform()
+
+
+func _apply_viewer_camera_transform() -> void:
+	if (
+		_is_ar_mode
+		or not _desktop_camera_base_valid
+		or not is_instance_valid(camera)
+		or not is_instance_valid(diorama_root)
+	):
+		return
+	var pivot := diorama_root.global_position
+	var vertical_axis := diorama_root.global_basis.y.normalized()
+	if vertical_axis.length_squared() < 0.99:
+		vertical_axis = Vector3.UP
+	var orbit := Basis(vertical_axis, _viewer_yaw_rad)
+	var result := _desktop_camera_base_transform
+	var base_offset := _desktop_camera_base_transform.origin - pivot
+	result.origin = pivot + orbit * (base_offset * _viewer_zoom)
+	result.basis = orbit * _desktop_camera_base_transform.basis
+	camera.global_transform = result
+
+
+func _refresh_view_controls() -> void:
+	for button in [
+		zoom_out_button,
+		zoom_in_button,
+		rotate_left_button,
+		rotate_right_button,
+	]:
+		if is_instance_valid(button):
+			button.disabled = _is_ar_mode
+	if not is_instance_valid(view_status_label):
+		return
+	if _is_ar_mode:
+		view_status_label.text = "Vista controlada por el dispositivo AR"
+		return
+	var zoom_percent := roundi(100.0 / _viewer_zoom)
+	var yaw_degrees := roundi(rad_to_deg(_viewer_yaw_rad))
+	view_status_label.text = "Zoom %d%% · giro %d°" % [
+		zoom_percent,
+		yaw_degrees,
+	]
+
+
 func _set_desktop_camera_mode(mode: int) -> void:
 	_desktop_camera_mode = mode
 	_apply_character_presentation_scale()
@@ -714,6 +930,7 @@ func _frame_cinematic_segment(start_xz: Vector2, end_xz: Vector2) -> void:
 		)
 	camera.global_position = desired_position
 	camera.look_at(look_target, Vector3.UP)
+	_capture_desktop_camera_base()
 
 
 func _refresh_camera_button() -> void:
@@ -740,6 +957,7 @@ func _set_desktop_camera(top_view: bool) -> void:
 	else:
 		camera.position = Vector3(0.88, 1.72, 0.02)
 		camera.look_at(Vector3(0.0, 0.06, 0.0), Vector3.UP)
+	_capture_desktop_camera_base()
 
 
 func _on_capture_corner() -> void:
