@@ -45,7 +45,7 @@ puede seguir el mapa de alturas sin mezclar escalas físicas y lógicas.
   de la columna de agua.
 - Cielo procedural, luz solar suave, tonemapping ACES y perspectiva
   atmosférica; la mesa física queda oculta durante la presentación.
-- Selección de destino mediante clic/toque.
+- Selección de destino mediante doble clic/doble toque.
 - Guardia fronterizo estilizado de nivel héroe generado en Blender: geometría
   detallada, materiales PBR con albedo y normales, rig de 18 huesos y
   animaciones `Idle`, `Walk` y `Attack`.
@@ -79,8 +79,8 @@ godot --path .
 
 La escena arranca con el aldeano caminando desde el extremo izquierdo hacia
 las primeras rocas del centro. Al llegar se detiene; `Repetir paseo` lo
-devuelve al cabo para iniciar el trayecto otra vez. Al hacer clic sobre el
-terreno se fija un destino manual. `Cámara` recorre las vistas de plano fijo,
+devuelve al cabo para iniciar el trayecto otra vez. Al hacer doble clic sobre
+el terreno se fija un destino manual. `Cámara` recorre las vistas de plano fijo,
 general y cenital. También puedes crear un destino aleatorio o mostrar la
 cuadrícula.
 
@@ -113,8 +113,9 @@ El panel del visor incluye **Alejar**, **Acercar** y giro de 15° en ambos
 sentidos alrededor del eje vertical central de la isla. También se puede usar
 la rueda del mouse o las teclas `+`/`−` para zoom, `Q`/`E` para girar,
 arrastrar con el botón derecho para un giro continuo y `R` para restaurar el
-encuadre. En pantallas táctiles, un arrastre horizontal gira la vista; un toque
-corto sigue marcando el destino del aldeano.
+encuadre. En iPhone y iPad, juntar dos dedos acerca la cámara, abrirlos la
+aleja y girarlos juntos orbita la vista alrededor del centro de la isla. Un
+doble toque fija el destino del aldeano; un toque simple no lo desplaza.
 
 Para validar con una plantilla descargada fuera de la instalación de Godot:
 

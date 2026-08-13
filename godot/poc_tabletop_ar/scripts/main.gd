@@ -29,7 +29,7 @@ const VIEW_ZOOM_MAX := 2.0
 const VIEW_ZOOM_FACTOR := 1.15
 const VIEW_ROTATION_STEP_RAD := PI / 12.0
 const VIEW_DRAG_RADIANS_PER_PIXEL := 0.006
-const TOUCH_ROTATION_THRESHOLD_PX := 8.0
+const TOUCH_GESTURE_MIN_DISTANCE_PX := 12.0
 
 enum DesktopCameraMode {
 	CINEMATIC,
@@ -79,9 +79,12 @@ var _desktop_camera_base_transform := Transform3D.IDENTITY
 var _desktop_camera_base_valid := false
 var _viewer_zoom := 1.0
 var _viewer_yaw_rad := 0.0
-var _active_touch_index := -1
-var _touch_start_position := Vector2.ZERO
-var _touch_dragged := false
+var _touch_positions: Dictionary = {}
+var _gesture_touch_indices := PackedInt32Array()
+var _gesture_consumed_indices: Dictionary = {}
+var _multi_touch_active := false
+var _multi_touch_previous_distance := 0.0
+var _multi_touch_previous_angle := 0.0
 var _rng := RandomNumberGenerator.new()
 var biome_counts: Dictionary = {}
 var _is_web_preview := RUNTIME_PROFILE.is_web_preview()
@@ -123,31 +126,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	var screen_position := Vector2.ZERO
-	var pressed := false
-	if event is InputEventMouseButton:
-		var mouse_event := event as InputEventMouseButton
-		pressed = mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed
-		screen_position = mouse_event.position
-	elif event is InputEventScreenTouch:
-		var touch_event := event as InputEventScreenTouch
-		if _is_ar_mode:
-			pressed = touch_event.pressed
-			screen_position = touch_event.position
-		elif touch_event.pressed and _active_touch_index < 0:
-			_active_touch_index = touch_event.index
-			_touch_start_position = touch_event.position
-			_touch_dragged = false
-			return
-		elif not touch_event.pressed and touch_event.index == _active_touch_index:
-			pressed = not _touch_dragged
-			screen_position = touch_event.position
-			_active_touch_index = -1
-			_touch_dragged = false
-	if not pressed or not calibration.is_valid:
+	var activation := _destination_activation_for_event(event)
+	if not bool(activation.get("ok", false)) or not calibration.is_valid:
 		return
 
-	var hit := _screen_to_terrain(screen_position)
+	var hit := _screen_to_terrain(activation["position"] as Vector2)
 	if hit.get("ok", false):
 		_set_manual_target(hit["position"])
 		get_viewport().set_input_as_handled()
@@ -156,6 +139,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func _handle_view_input(event: InputEvent) -> bool:
 	if _is_ar_mode:
 		return false
+	if event is InputEventScreenTouch:
+		return _handle_touch_contact(event as InputEventScreenTouch)
+	if event is InputEventScreenDrag:
+		return _handle_touch_drag(event as InputEventScreenDrag)
 	if event is InputEventKey:
 		var key_event := event as InputEventKey
 		if not key_event.pressed or key_event.echo:
@@ -191,21 +178,128 @@ func _handle_view_input(event: InputEvent) -> bool:
 		if motion_event.button_mask & MOUSE_BUTTON_MASK_RIGHT:
 			_rotate_view(-motion_event.relative.x * VIEW_DRAG_RADIANS_PER_PIXEL)
 			return true
-	if event is InputEventScreenDrag:
-		var drag_event := event as InputEventScreenDrag
-		if drag_event.index != _active_touch_index:
-			return false
-		if drag_event.position.distance_to(_touch_start_position) >= TOUCH_ROTATION_THRESHOLD_PX:
-			_touch_dragged = true
-		if _touch_dragged:
-			_rotate_view(-drag_event.relative.x * VIEW_DRAG_RADIANS_PER_PIXEL)
-			return true
 	if event is InputEventMagnifyGesture:
 		var magnify_event := event as InputEventMagnifyGesture
 		if magnify_event.factor > 0.0:
-			_set_viewer_zoom(_viewer_zoom / magnify_event.factor)
+			_set_viewer_zoom(_viewer_zoom * magnify_event.factor)
 			return true
 	return false
+
+
+func _destination_activation_for_event(event: InputEvent) -> Dictionary:
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		return {
+			"ok": (
+				mouse_event.button_index == MOUSE_BUTTON_LEFT
+				and mouse_event.pressed
+				and mouse_event.double_click
+			),
+			"position": mouse_event.position,
+		}
+	if event is InputEventScreenTouch:
+		var touch_event := event as InputEventScreenTouch
+		return {
+			"ok": touch_event.pressed and touch_event.double_tap,
+			"position": touch_event.position,
+		}
+	return {"ok": false}
+
+
+func _handle_touch_contact(event: InputEventScreenTouch) -> bool:
+	if event.pressed:
+		_touch_positions[event.index] = event.position
+		if _touch_positions.size() < 2:
+			return false
+		_gesture_consumed_indices[event.index] = true
+		if not _multi_touch_active:
+			_begin_multi_touch_gesture()
+		return true
+
+	var was_gesture := _gesture_consumed_indices.has(event.index)
+	var ended_active_pair := (
+		_multi_touch_active and _gesture_touch_indices.has(event.index)
+	)
+	_touch_positions.erase(event.index)
+	if ended_active_pair:
+		_end_multi_touch_gesture()
+		if _touch_positions.size() >= 2:
+			_begin_multi_touch_gesture()
+	if _touch_positions.is_empty():
+		_gesture_consumed_indices.clear()
+	return was_gesture
+
+
+func _handle_touch_drag(event: InputEventScreenDrag) -> bool:
+	_touch_positions[event.index] = event.position
+	if not _multi_touch_active:
+		return _gesture_consumed_indices.has(event.index)
+	if not _gesture_touch_indices.has(event.index):
+		return true
+	_apply_multi_touch_gesture()
+	return true
+
+
+func _begin_multi_touch_gesture() -> void:
+	var touch_indices := _touch_positions.keys()
+	touch_indices.sort()
+	if touch_indices.size() < 2:
+		return
+	_gesture_touch_indices = PackedInt32Array([
+		int(touch_indices[0]),
+		int(touch_indices[1]),
+	])
+	for touch_index in _gesture_touch_indices:
+		_gesture_consumed_indices[touch_index] = true
+	var first_position: Vector2 = _touch_positions[_gesture_touch_indices[0]]
+	var second_position: Vector2 = _touch_positions[_gesture_touch_indices[1]]
+	var offset := second_position - first_position
+	_multi_touch_previous_distance = offset.length()
+	_multi_touch_previous_angle = offset.angle()
+	_multi_touch_active = true
+
+
+func _end_multi_touch_gesture() -> void:
+	_multi_touch_active = false
+	_gesture_touch_indices = PackedInt32Array()
+	_multi_touch_previous_distance = 0.0
+	_multi_touch_previous_angle = 0.0
+
+
+func _apply_multi_touch_gesture() -> void:
+	if not _multi_touch_active or _gesture_touch_indices.size() != 2:
+		return
+	var first_position: Vector2 = _touch_positions[_gesture_touch_indices[0]]
+	var second_position: Vector2 = _touch_positions[_gesture_touch_indices[1]]
+	var offset := second_position - first_position
+	var current_distance := offset.length()
+	var current_angle := offset.angle()
+	if (
+		current_distance >= TOUCH_GESTURE_MIN_DISTANCE_PX
+		and _multi_touch_previous_distance >= TOUCH_GESTURE_MIN_DISTANCE_PX
+	):
+		var distance_ratio := current_distance / _multi_touch_previous_distance
+		var angle_delta := wrapf(
+			current_angle - _multi_touch_previous_angle,
+			-PI,
+			PI
+		)
+		var next_zoom := clampf(
+			_viewer_zoom * distance_ratio,
+			VIEW_ZOOM_MIN,
+			VIEW_ZOOM_MAX
+		)
+		var next_yaw := wrapf(_viewer_yaw_rad + angle_delta, -PI, PI)
+		if (
+			not is_equal_approx(next_zoom, _viewer_zoom)
+			or not is_equal_approx(next_yaw, _viewer_yaw_rad)
+		):
+			_viewer_zoom = next_zoom
+			_viewer_yaw_rad = next_yaw
+			_apply_viewer_camera_transform()
+			_refresh_view_controls()
+	_multi_touch_previous_distance = current_distance
+	_multi_touch_previous_angle = current_angle
 
 
 func _build_camera_background() -> void:
@@ -511,7 +605,10 @@ func _build_interface() -> void:
 	view_status_label.text = "Zoom 100% · giro 0°"
 	panel_content.add_child(view_status_label)
 	var view_hint := Label.new()
-	view_hint.text = "Rueda o +/−: zoom · Q/E o arrastre derecho: girar · R: restaurar"
+	view_hint.text = (
+		"iPhone/iPad: juntar = acercar · abrir = alejar · girar dos dedos\n"
+		+ "Mouse: rueda o +/− · Q/E o arrastre derecho · R: restaurar"
+	)
 	view_hint.add_theme_color_override("font_color", Color(0.68, 0.78, 0.85))
 	view_hint.add_theme_font_size_override("font_size", 12)
 	view_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -524,7 +621,7 @@ func _build_interface() -> void:
 	instruction_label = Label.new()
 	instruction_label.text = (
 		"El aldeano cruzará desde el cabo izquierdo hasta las rocas centrales. "
-		+ "Haz clic sobre el terreno para darle un destino manual."
+		+ "Haz doble clic o doble toque sobre el terreno para darle un destino manual."
 	)
 	instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	instruction_label.custom_minimum_size.x = 350.0
@@ -630,7 +727,8 @@ func _on_unit_target_reached() -> void:
 		)
 		return
 	instruction_label.text = (
-		"Destino alcanzado. Haz clic en otro punto o reinicia el paseo a las rocas."
+		"Destino alcanzado. Haz doble clic o doble toque en otro punto, "
+		+ "o reinicia el paseo a las rocas."
 	)
 
 
@@ -981,7 +1079,7 @@ func _on_capture_corner() -> void:
 		capture_corner_button.text = "Recalibrar mesa"
 		instruction_label.text = (
 			"Mesa fijada. El aldeano ya recorre el paisaje; "
-			+ "toca el terreno para cambiar su destino."
+			+ "toca dos veces el terreno para cambiar su destino."
 		)
 		_ar_status = "Mesa calibrada y terreno bloqueado"
 	else:

@@ -1456,6 +1456,8 @@ func _test_walking_showcase() -> void:
 					< 0.0001,
 				"restaurar debe recuperar el encuadre base"
 			)
+			_test_ios_view_gestures(showcase, showcase_camera, view_pivot)
+			showcase.call("_reset_view")
 		var initial_camera_position := showcase_camera.global_position
 		var camera_inverse := showcase_camera.global_transform.affine_inverse()
 		var start_in_camera: Vector3 = camera_inverse * showcase.calibration.simulation_to_world(
@@ -1589,6 +1591,126 @@ func _test_walking_showcase() -> void:
 			)
 		)
 	showcase.queue_free()
+
+
+func _test_ios_view_gestures(
+	showcase: Node,
+	showcase_camera: Camera3D,
+	view_pivot: Vector3
+) -> void:
+	var single_click := InputEventMouseButton.new()
+	single_click.button_index = MOUSE_BUTTON_LEFT
+	single_click.pressed = true
+	single_click.position = Vector2(320.0, 240.0)
+	_expect(
+		not bool(showcase.call("_destination_activation_for_event", single_click).get("ok")),
+		"un clic simple no debe fijar un destino"
+	)
+	var double_click := InputEventMouseButton.new()
+	double_click.button_index = MOUSE_BUTTON_LEFT
+	double_click.pressed = true
+	double_click.double_click = true
+	double_click.position = Vector2(320.0, 240.0)
+	_expect(
+		bool(showcase.call("_destination_activation_for_event", double_click).get("ok")),
+		"el doble clic debe activar un destino"
+	)
+	var single_tap := InputEventScreenTouch.new()
+	single_tap.index = 0
+	single_tap.pressed = true
+	single_tap.position = Vector2(320.0, 240.0)
+	_expect(
+		not bool(showcase.call("_destination_activation_for_event", single_tap).get("ok")),
+		"un toque simple no debe fijar un destino"
+	)
+	var double_tap := InputEventScreenTouch.new()
+	double_tap.index = 0
+	double_tap.pressed = true
+	double_tap.double_tap = true
+	double_tap.position = Vector2(320.0, 240.0)
+	_expect(
+		bool(showcase.call("_destination_activation_for_event", double_tap).get("ok")),
+		"el doble toque de iOS debe activar un destino"
+	)
+
+	var touch_left := InputEventScreenTouch.new()
+	touch_left.index = 0
+	touch_left.pressed = true
+	touch_left.position = Vector2(200.0, 300.0)
+	_expect(
+		not bool(showcase.call("_handle_view_input", touch_left)),
+		"el primer dedo no debe mover la cámara"
+	)
+	var touch_right := InputEventScreenTouch.new()
+	touch_right.index = 1
+	touch_right.pressed = true
+	touch_right.position = Vector2(400.0, 300.0)
+	_expect(
+		bool(showcase.call("_handle_view_input", touch_right)),
+		"el segundo dedo debe iniciar el gesto de cámara"
+	)
+	var base_distance := showcase_camera.global_position.distance_to(view_pivot)
+	var pinch_in := InputEventScreenDrag.new()
+	pinch_in.index = 1
+	pinch_in.position = Vector2(350.0, 300.0)
+	pinch_in.relative = Vector2(-50.0, 0.0)
+	_expect(
+		bool(showcase.call("_handle_view_input", pinch_in)),
+		"juntar los dedos debe consumirse como gesto de zoom"
+	)
+	_expect(
+		showcase_camera.global_position.distance_to(view_pivot) < base_distance,
+		"juntar los dedos debe acercar la cámara"
+	)
+	var pinch_out := InputEventScreenDrag.new()
+	pinch_out.index = 1
+	pinch_out.position = Vector2(400.0, 300.0)
+	pinch_out.relative = Vector2(50.0, 0.0)
+	showcase.call("_handle_view_input", pinch_out)
+	_expect_near(
+		showcase_camera.global_position.distance_to(view_pivot),
+		base_distance,
+		0.0001,
+		"abrir los dedos debe alejar y recuperar la distancia"
+	)
+	var twist := InputEventScreenDrag.new()
+	twist.index = 1
+	twist.position = Vector2(200.0, 500.0)
+	twist.relative = Vector2(-200.0, 200.0)
+	showcase.call("_handle_view_input", twist)
+	_expect_near(
+		float(showcase.get("_viewer_yaw_rad")),
+		PI / 2.0,
+		0.0001,
+		"girar dos dedos juntos debe orbitar la cámara 90 grados"
+	)
+	_expect_near(
+		showcase_camera.global_position.distance_to(view_pivot),
+		base_distance,
+		0.0001,
+		"el giro de dos dedos debe conservar la distancia al centro"
+	)
+	var release_right := InputEventScreenTouch.new()
+	release_right.index = 1
+	release_right.pressed = false
+	release_right.position = twist.position
+	_expect(
+		bool(showcase.call("_handle_view_input", release_right)),
+		"soltar un dedo del gesto no debe producir un toque de destino"
+	)
+	var release_left := InputEventScreenTouch.new()
+	release_left.index = 0
+	release_left.pressed = false
+	release_left.position = touch_left.position
+	_expect(
+		bool(showcase.call("_handle_view_input", release_left)),
+		"el último dedo del gesto tampoco debe producir un toque de destino"
+	)
+	_expect(
+		not bool(showcase.get("_multi_touch_active"))
+		and (showcase.get("_touch_positions") as Dictionary).is_empty(),
+		"al soltar ambos dedos debe cerrarse el gesto táctil"
+	)
 
 
 func _expect(condition: bool, message: String) -> void:
