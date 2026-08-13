@@ -1,0 +1,77 @@
+{
+  "albedo": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/environment/island_biome/textures/palms/palm_frond_atlas_albedo_v1.png",
+  "alpha_clip": 0.42,
+  "atlas_size": [
+    2048,
+    2048
+  ],
+  "cells": [
+    {
+      "alpha_clip_coverage_percent": 20.577,
+      "column": 0,
+      "index": 0,
+      "label": "fan_green",
+      "row_from_top": 0
+    },
+    {
+      "alpha_clip_coverage_percent": 18.636,
+      "column": 1,
+      "index": 1,
+      "label": "fan_yellow_green",
+      "row_from_top": 0
+    },
+    {
+      "alpha_clip_coverage_percent": 10.245,
+      "column": 0,
+      "index": 2,
+      "label": "date_arching",
+      "row_from_top": 1
+    },
+    {
+      "alpha_clip_coverage_percent": 9.674,
+      "column": 1,
+      "index": 3,
+      "label": "date_dense",
+      "row_from_top": 1
+    },
+    {
+      "alpha_clip_coverage_percent": 10.985,
+      "column": 0,
+      "index": 4,
+      "label": "date_warm",
+      "row_from_top": 2
+    },
+    {
+      "alpha_clip_coverage_percent": 10.21,
+      "column": 1,
+      "index": 5,
+      "label": "coconut_long",
+      "row_from_top": 2
+    },
+    {
+      "alpha_clip_coverage_percent": 10.788,
+      "column": 0,
+      "index": 6,
+      "label": "coconut_open",
+      "row_from_top": 3
+    },
+    {
+      "alpha_clip_coverage_percent": 10.464,
+      "column": 1,
+      "index": 7,
+      "label": "coconut_brown_tip",
+      "row_from_top": 3
+    }
+  ],
+  "grid": [
+    2,
+    4
+  ],
+  "mask": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/environment/island_biome/textures/palms/palm_frond_atlas_mask_v1.png",
+  "normal": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/environment/island_biome/textures/palms/palm_frond_atlas_normal_v1.png",
+  "partial_alpha_percent": 7.908,
+  "preview": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/previews/island_biome/palm_frond_atlas.png",
+  "source": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/art/source/palm_fronds/frond_atlas_alpha_raw_v1.png",
+  "suspicious_magenta_visible_percent": 0.1519,
+  "visible_percent": 12.698
+}

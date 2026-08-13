@@ -1,0 +1,77 @@
+{
+  "albedo": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/environment/island_biome/textures/shrubs/shrub_atlas_albedo_v1.png",
+  "alpha_clip": 0.42,
+  "atlas_size": [
+    2048,
+    2048
+  ],
+  "cells": [
+    {
+      "alpha_clip_coverage_percent": 20.247,
+      "column": 0,
+      "index": 0,
+      "label": "dense_deep_green",
+      "row_from_top": 0
+    },
+    {
+      "alpha_clip_coverage_percent": 19.945,
+      "column": 1,
+      "index": 1,
+      "label": "dense_fresh_green",
+      "row_from_top": 0
+    },
+    {
+      "alpha_clip_coverage_percent": 23.077,
+      "column": 0,
+      "index": 2,
+      "label": "dense_round",
+      "row_from_top": 1
+    },
+    {
+      "alpha_clip_coverage_percent": 20.705,
+      "column": 1,
+      "index": 3,
+      "label": "dense_sun_exposed",
+      "row_from_top": 1
+    },
+    {
+      "alpha_clip_coverage_percent": 17.159,
+      "column": 0,
+      "index": 4,
+      "label": "wild_branching",
+      "row_from_top": 2
+    },
+    {
+      "alpha_clip_coverage_percent": 16.914,
+      "column": 1,
+      "index": 5,
+      "label": "wild_open",
+      "row_from_top": 2
+    },
+    {
+      "alpha_clip_coverage_percent": 15.653,
+      "column": 0,
+      "index": 6,
+      "label": "wild_yellow_green",
+      "row_from_top": 3
+    },
+    {
+      "alpha_clip_coverage_percent": 15.621,
+      "column": 1,
+      "index": 7,
+      "label": "wild_brown_tips",
+      "row_from_top": 3
+    }
+  ],
+  "grid": [
+    2,
+    4
+  ],
+  "mask": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/environment/island_biome/textures/shrubs/shrub_atlas_mask_v1.png",
+  "normal": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/environment/island_biome/textures/shrubs/shrub_atlas_normal_v1.png",
+  "partial_alpha_percent": 3.96,
+  "preview": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/previews/island_biome/shrub_foliage_atlas.png",
+  "source": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/art/source/shrub_foliage/shrub_atlas_alpha_raw_v1.png",
+  "suspicious_magenta_visible_percent": 0.02146,
+  "visible_percent": 18.665
+}

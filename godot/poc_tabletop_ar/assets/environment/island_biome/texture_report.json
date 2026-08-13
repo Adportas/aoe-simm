@@ -1,0 +1,36 @@
+{
+  "reference": "art/references/island_biome/foto_1.jpg",
+  "texture_size": 1024,
+  "layer_order": [
+    "wet_sand",
+    "dry_sand",
+    "soil",
+    "grass_green",
+    "grass_dry",
+    "rock",
+    "litter",
+    "pebbles"
+  ],
+  "layer_packing": {
+    "albedo": "RGB sRGB",
+    "normal": "RGB tangent-space",
+    "orm": "R height, G roughness, B ambient occlusion"
+  },
+  "palette": {
+    "grass": [
+      0.29412,
+      0.35686,
+      0.30196
+    ],
+    "soil": [
+      0.20784,
+      0.20784,
+      0.18824
+    ],
+    "sand": [
+      0.61569,
+      0.64706,
+      0.6
+    ]
+  }
+}

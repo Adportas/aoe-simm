@@ -1,0 +1,70 @@
+{
+  "generator": "tools/generate_island_world.py",
+  "resolution": [
+    576,
+    1024
+  ],
+  "pixel_size_m": 0.694444,
+  "map_size_m": [
+    400.0,
+    720.0
+  ],
+  "runtime_encoding": "raw little-endian RF float32, native metres",
+  "authoring_encoding": "OpenEXR float32, native metres",
+  "preview_height_encoding_m": [
+    -16.0,
+    64.0
+  ],
+  "preview_sdf_encoding_m": [
+    -96.0,
+    224.0
+  ],
+  "land_area_m2": 153832.9,
+  "land_area_hectares": 15.383,
+  "minimum_height_m": -14.8,
+  "maximum_height_m": 60.0,
+  "maximum_slope_degrees": 86.263,
+  "coast_slope_degrees": {
+    "mean": 6.627,
+    "median": 4.295,
+    "p95": 7.793
+  },
+  "cliff_pixels_over_55_degrees": 6606,
+  "erosion_iterations": 220,
+  "layers": [
+    "wet_sand",
+    "dry_sand",
+    "soil",
+    "grass_green",
+    "grass_dry",
+    "rock",
+    "litter",
+    "pebbles"
+  ],
+  "dominant_layer_share_percent": {
+    "wet_sand": 3.48,
+    "dry_sand": 8.56,
+    "soil": 7.95,
+    "grass_green": 31.56,
+    "grass_dry": 21.55,
+    "rock": 10.3,
+    "litter": 15.58,
+    "pebbles": 1.04
+  },
+  "terrain_detail_maps": {
+    "normal_pixels_over_20_degrees_percent": 20.91,
+    "ao_p01": 0.623,
+    "ao_median": 0.928
+  },
+  "dominant_soil_patches": {
+    "count": 5583,
+    "largest_hectares": 0.062,
+    "largest_share_percent": 5.05
+  },
+  "density_channels": [
+    "canopy",
+    "shrubs",
+    "groundcover",
+    "rocks"
+  ]
+}

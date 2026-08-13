@@ -1,0 +1,86 @@
+{
+  "asset": "AoE Villager TRELLIS 2",
+  "source_master": "/Users/heinrichclaw/AoE_VR/artifacts/villager-3dgen-20260811/villager_trellis2_master.glb",
+  "generator": {
+    "model": "microsoft/TRELLIS.2-4B",
+    "pipeline_type": "1024_cascade",
+    "seed": 42,
+    "master_texture_size": 4096
+  },
+  "geometry": {
+    "master_triangles": 326463,
+    "game_triangles": 72000,
+    "game_vertices": 79569,
+    "height_m": 1.81976,
+    "bounds_min": [
+      -0.42947,
+      -0.21492,
+      -0.00034
+    ],
+    "bounds_max": [
+      0.42916,
+      0.21952,
+      1.81943
+    ],
+    "target_triangle_budget": 72000
+  },
+  "rig": {
+    "bones": 18,
+    "bone_names": [
+      "Root",
+      "Pelvis",
+      "Spine",
+      "Chest",
+      "Neck",
+      "Head",
+      "UpperArm.L",
+      "LowerArm.L",
+      "Hand.L",
+      "UpperArm.R",
+      "LowerArm.R",
+      "Hand.R",
+      "Thigh.L",
+      "Shin.L",
+      "Foot.L",
+      "Thigh.R",
+      "Shin.R",
+      "Foot.R"
+    ],
+    "binding": {
+      "method": "voxel_proxy_bone_heat",
+      "automatic_error": null,
+      "unweighted_vertices": 0
+    },
+    "animations_seconds": {
+      "Idle": 2.0,
+      "Walk": 1.0,
+      "Attack": 1.25
+    }
+  },
+  "textures": {
+    "basecolor_master": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/textures/villager_trellis/villager_basecolor_4k.webp",
+    "metallic_roughness_master": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/textures/villager_trellis/villager_metallic_roughness_4k.webp",
+    "basecolor_game": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/textures/villager_trellis/villager_basecolor_2k.webp",
+    "metallic_roughness_game": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/textures/villager_trellis/villager_metallic_roughness_2k.webp",
+    "normal_game": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/textures/villager_trellis/villager_normal_2k.png",
+    "ao_game": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/textures/villager_trellis/villager_ao_2k.png",
+    "bake_errors": []
+  },
+  "outputs": {
+    "godot_glb": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/villager_trellis.glb",
+    "blender_source": "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/assets/units/source/villager_trellis.blend",
+    "previews": [
+      "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/previews/villager_trellis/villager_hero.png",
+      "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/previews/villager_trellis/villager_front.png",
+      "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/previews/villager_trellis/villager_rear.png",
+      "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/previews/villager_trellis/villager_walk.png",
+      "/Users/heinrichclaw/AoE_VR/godot/poc_tabletop_ar/previews/villager_trellis/villager_attack.png"
+    ]
+  },
+  "validation": {
+    "rest_height_ok": true,
+    "triangle_budget_ok": true,
+    "unweighted_vertices": 0,
+    "idle_deformed_height_m": 1.82524
+  }
+}

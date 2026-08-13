@@ -1,0 +1,14 @@
+.godot/
+exports/
+build/
+export_presets.cfg
+*.ipa
+*.xcarchive
+.DS_Store
+__pycache__/
+*.py[cod]
+*.blend1
+
+# Binarios descargables; se regeneran con tools/install_apple_plugins.sh.
+addons/GodotApplePluginsARKit/bin/
+addons/GodotApplePluginsRuntime/bin/

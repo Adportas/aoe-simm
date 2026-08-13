@@ -1,0 +1,79 @@
+name: Godot Web Preview
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "godot/poc_tabletop_ar/**"
+      - ".github/workflows/godot-web-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: godot-web-preview
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.1"
+  PROJECT_PATH: godot/poc_tabletop_ar
+
+jobs:
+  build:
+    name: Export Web Preview
+    runs-on: ubuntu-24.04
+    container:
+      image: barichello/godot-ci:4.7.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Godot export templates
+        shell: bash
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/
+          mv "/root/.local/share/godot/export_templates/${GODOT_VERSION}.stable" \
+            ~/.local/share/godot/export_templates/
+
+      - name: Configure Web preset
+        shell: bash
+        run: |
+          cp "$PROJECT_PATH/export_presets.web.example" "$PROJECT_PATH/export_presets.cfg"
+
+      - name: Export Web Preview
+        shell: bash
+        run: |
+          export_directory="$GITHUB_WORKSPACE/build/web-preview"
+          mkdir -p "$export_directory"
+          godot --headless --path "$PROJECT_PATH" \
+            --export-release "Web Preview" "$export_directory/index.html"
+          touch "$export_directory/.nojekyll"
+          for required_file in index.html index.js index.wasm index.pck; do
+            test -s "$export_directory/$required_file"
+          done
+          du -sh "$export_directory"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: build/web-preview
+          include-hidden-files: true
+
+  deploy:
+    name: Publish GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

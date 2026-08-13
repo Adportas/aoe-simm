@@ -1,0 +1,24 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/units/villager_trellis.glb" id="1_villager"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_villager"]
+radius = 0.32
+height = 1.82
+
+[node name="VillagerAsset" type="Node3D"]
+metadata/_asset_pipeline = "TRELLIS.2 1024 cascade -> Blender game prep -> Godot"
+metadata/_authored_height_m = 1.82
+metadata/_triangle_budget = 72000
+metadata/_authored_forward_axis = "+Z"
+metadata/_runtime_forward_axis = "-Z"
+
+[node name="Model" parent="." instance=ExtResource("1_villager")]
+
+[node name="SelectionBody" type="StaticBody3D" parent="."]
+collision_layer = 4
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="SelectionBody"]
+position = Vector3(0, 0.91, 0)
+shape = SubResource("CapsuleShape3D_villager")
